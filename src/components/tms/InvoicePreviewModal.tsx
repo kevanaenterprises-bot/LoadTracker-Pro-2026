@@ -349,8 +349,8 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
             .time-value { font-size: 13px; color: #1e293b; margin-top: 2px; }
             .time-pending { font-size: 13px; color: #94a3b8; font-style: italic; margin-top: 2px; }
             .total-row { text-align: right; font-size: 20px; font-weight: 700; color: #2563eb; margin-bottom: 32px; }
-            .pod-section { margin-top: 24px; }
-            .pod-image { max-width: 100%; margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 4px; }
+            .pod-section { margin-top: 24px; page-break-before: always; }
+            .pod-image { max-width: 100%; margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 4px; page-break-before: always; page-break-after: always; page-break-inside: avoid; }
             .broken-pod { display: none; }
             @media print { body { padding: 20px; } .no-print { display: none; } .broken-pod { display: none; } }
           </style>
@@ -855,7 +855,7 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
 
                 {/* POD Documents */}
                 {documents.length > 0 && (
-                  <div className="border-t border-slate-200 pt-6">
+                  <div className="pod-section border-t border-slate-200 pt-6">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">
                         Attached POD Documents
@@ -892,7 +892,7 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                                   <img
                                     src={doc.file_url}
                                     alt={doc.file_name}
-                                    className="w-full object-contain max-h-[600px]"
+                                    className="pod-image w-full object-contain max-h-[600px]"
                                     onError={() => handlePodImageError(doc.id)}
                                   />
                                 )}
