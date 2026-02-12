@@ -749,10 +749,14 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                 page-break-inside: avoid !important;
               }
               
-              /* Each POD image on its own page */
-              .pod-image-wrapper { 
+              /* Each POD image on its own page (except first) */
+              .pod-image-wrapper:not(:first-child) { 
                 page-break-before: always !important;
                 page-break-after: auto !important;
+                page-break-inside: avoid !important;
+              }
+              
+              .pod-image-wrapper:first-child {
                 page-break-inside: avoid !important;
               }
               
@@ -944,15 +948,15 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
     `);
     printWindow.document.close();
     
-    // Wait for all images to load before printing
+     // Wait for all images to load before printing
     const images = printWindow.document.querySelectorAll('img');
     const imagePromises = Array.from(images).map(img => {
-      return new Promise((resolve) => {
+      return new Promise<void>((resolve) => {
         if (img.complete) {
-          resolve(null);
+          resolve();
         } else {
-          img.onload = () => resolve(null);
-          img.onerror = () => resolve(null); // Still resolve on error to not block
+          img.onload = () => resolve();
+          img.onerror = () => resolve(); // Still resolve on error to not block
         }
       });
     });
@@ -960,9 +964,11 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
     await Promise.all(imagePromises);
     
     printWindow.focus();
+    
+    const PRINT_RENDER_DELAY_MS = 1000;
     setTimeout(() => {
       printWindow.print();
-    }, 1000); // Increased from 500ms to 1000ms
+    }, PRINT_RENDER_DELAY_MS);
   };
 
   if (!isOpen || !load || !invoice) return null;
