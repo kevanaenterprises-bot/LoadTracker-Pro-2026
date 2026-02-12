@@ -350,7 +350,7 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
             .time-pending { font-size: 13px; color: #94a3b8; font-style: italic; margin-top: 2px; }
             .total-row { text-align: right; font-size: 20px; font-weight: 700; color: #2563eb; margin-bottom: 32px; }
             .pod-section { margin-top: 24px; page-break-before: always; }
-            .pod-image { max-width: 100%; margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 4px; page-break-before: always; page-break-after: always; page-break-inside: avoid; }
+            .pod-image { max-width: 100%; margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 4px; page-break-before: always; page-break-inside: avoid; }
             .broken-pod { display: none; }
             @media print { body { padding: 20px; } .no-print { display: none; } .broken-pod { display: none; } }
           </style>
