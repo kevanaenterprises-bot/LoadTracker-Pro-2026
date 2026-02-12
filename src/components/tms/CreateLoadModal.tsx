@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, MapPin, Calendar, Package, DollarSign, Loader2, Hash, Building2, ChevronDown, Plus, Trash2, Truck, AlertTriangle, Lock, ShieldAlert } from 'lucide-react';
+import { X, MapPin, Calendar, Package, DollarSign, Loader2, Hash, Building2, ChevronDown, Plus, Trash2, Truck, AlertTriangle, Lock, ShieldAlert, FileText, Upload, CheckCircle2, AlertCircle } from 'lucide-react';
 import { supabase, supabaseUrl, supabaseKey } from '@/lib/supabase';
 import { Customer, Location } from '@/types/tms';
+import { extractTextFromImage, parseRateConfirmation, saveOcrTrainingData, ParsedRateConData } from '@/lib/ocrService';
 
 interface CreateLoadModalProps {
   isOpen: boolean;
@@ -64,6 +65,16 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
   const [duplicateLoadId, setDuplicateLoadId] = useState<string | null>(null);
   const [pendingFormData, setPendingFormData] = useState<any>(null);
   const overrideInputRef = useRef<HTMLInputElement>(null);
+  
+  // OCR state
+  const [showOcrUpload, setShowOcrUpload] = useState(false);
+  const [ocrFile, setOcrFile] = useState<File | null>(null);
+  const [ocrProcessing, setOcrProcessing] = useState(false);
+  const [ocrResult, setOcrResult] = useState<ParsedRateConData | null>(null);
+  const [ocrText, setOcrText] = useState('');
+  const [showOcrReview, setShowOcrReview] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const createdLoadIdRef = useRef<string | null>(null);
   
   // Multiple stops
   const [pickupStops, setPickupStops] = useState<StopData[]>([emptyStop()]);
@@ -187,6 +198,107 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
     if (deliveryStops.length > 1) {
       setDeliveryStops(prev => prev.filter((_, i) => i !== index));
     }
+  };
+
+  /** Handle OCR file upload */
+  const handleOcrFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setOcrFile(file);
+    setOcrProcessing(true);
+    setErrorMessage('');
+
+    try {
+      // Extract text from image/PDF
+      const text = await extractTextFromImage(file);
+      setOcrText(text);
+      
+      if (!text || text.trim().length === 0) {
+        throw new Error('No text could be extracted from the document. Please ensure the image is clear and try again.');
+      }
+      
+      // Parse the text into structured data
+      const parsed = await parseRateConfirmation(text);
+      setOcrResult(parsed);
+      
+      // Show review panel
+      setShowOcrReview(true);
+      
+    } catch (error: any) {
+      console.error('OCR processing failed:', error);
+      setErrorMessage(error?.message || 'Failed to scan document. Please enter information manually.');
+      setOcrFile(null);
+      setOcrText('');
+      setOcrResult(null);
+    } finally {
+      setOcrProcessing(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  /** Accept and pre-fill form with OCR results */
+  const handleAcceptOcrData = () => {
+    if (!ocrResult) return;
+
+    // Pre-fill form fields
+    if (ocrResult.load_number) {
+      setFormData(prev => ({ ...prev, load_number: ocrResult.load_number || '' }));
+    }
+    if (ocrResult.pickup_date) {
+      setFormData(prev => ({ ...prev, pickup_date: ocrResult.pickup_date || '' }));
+    }
+    if (ocrResult.delivery_date) {
+      setFormData(prev => ({ ...prev, delivery_date: ocrResult.delivery_date || '' }));
+    }
+    if (ocrResult.rate) {
+      setFormData(prev => ({ ...prev, manual_rate: ocrResult.rate?.toString() || '' }));
+    }
+    if (ocrResult.cargo_description) {
+      setFormData(prev => ({ ...prev, cargo_description: ocrResult.cargo_description || '' }));
+    }
+    if (ocrResult.weight) {
+      setFormData(prev => ({ ...prev, weight: ocrResult.weight || '' }));
+    }
+    
+    // Pre-fill pickup stop if address was found
+    if (ocrResult.pickup_city || ocrResult.pickup_address) {
+      setPickupStops([{
+        ...emptyStop(),
+        company_name: ocrResult.pickup_company || '',
+        address: ocrResult.pickup_address || '',
+        city: ocrResult.pickup_city || '',
+        state: ocrResult.pickup_state || 'TX',
+        zip: ocrResult.pickup_zip || '',
+      }]);
+    }
+    
+    // Pre-fill delivery stop if address was found
+    if (ocrResult.delivery_city || ocrResult.delivery_address) {
+      setDeliveryStops([{
+        ...emptyStop(),
+        company_name: ocrResult.delivery_company || '',
+        address: ocrResult.delivery_address || '',
+        city: ocrResult.delivery_city || '',
+        state: ocrResult.delivery_state || 'TX',
+        zip: ocrResult.delivery_zip || '',
+      }]);
+    }
+
+    // Close review panel and show success message
+    setShowOcrReview(false);
+    setShowOcrUpload(false);
+  };
+
+  /** Discard OCR results */
+  const handleDiscardOcrData = () => {
+    setOcrFile(null);
+    setOcrText('');
+    setOcrResult(null);
+    setShowOcrReview(false);
+    setShowOcrUpload(false);
   };
 
   /** Build the load insert payload */
@@ -347,7 +459,51 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
       }
 
       // No duplicate found — insert normally
-      await insertLoad();
+      const loadData = await insertLoad();
+      
+      // Store the created load ID for OCR training data
+      if (loadData?.id) {
+        createdLoadIdRef.current = loadData.id;
+        
+        // Save OCR training data if OCR was used
+        if (ocrResult && ocrText) {
+          try {
+            // Handle rate conversion properly - if user entered 0 explicitly, use it
+            const finalRate = formData.manual_rate 
+              ? parseFloat(formData.manual_rate) 
+              : (ocrResult.rate || undefined);
+            
+            await saveOcrTrainingData({
+              load_id: loadData.id,
+              original_text: ocrText,
+              extracted_data: ocrResult,
+              corrected_data: {
+                load_number: formData.load_number,
+                pickup_date: formData.pickup_date,
+                delivery_date: formData.delivery_date,
+                rate: finalRate,
+                weight: formData.weight,
+                cargo_description: formData.cargo_description,
+                pickup_company: pickupStops[0]?.company_name,
+                pickup_address: pickupStops[0]?.address,
+                pickup_city: pickupStops[0]?.city,
+                pickup_state: pickupStops[0]?.state,
+                pickup_zip: pickupStops[0]?.zip,
+                delivery_company: deliveryStops[0]?.company_name,
+                delivery_address: deliveryStops[0]?.address,
+                delivery_city: deliveryStops[0]?.city,
+                delivery_state: deliveryStops[0]?.state,
+                delivery_zip: deliveryStops[0]?.zip,
+              },
+              file_type: ocrFile?.type,
+              confidence_scores: ocrResult.confidence_scores,
+            });
+          } catch (ocrError) {
+            console.error('Failed to save OCR training data:', ocrError);
+            // Non-critical, don't fail the load creation
+          }
+        }
+      }
 
       onLoadCreated();
       onClose();
@@ -463,6 +619,15 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
     setDuplicateLoadId(null);
     setPendingFormData(null);
     submitInProgress.current = false;
+    
+    // Reset OCR state
+    setShowOcrUpload(false);
+    setOcrFile(null);
+    setOcrProcessing(false);
+    setOcrResult(null);
+    setOcrText('');
+    setShowOcrReview(false);
+    createdLoadIdRef.current = null;
   };
 
   if (!isOpen) return null;
@@ -493,6 +658,268 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
               <button type="button" onClick={() => setErrorMessage('')} className="ml-auto p-1 hover:bg-red-100 rounded">
                 <X className="w-4 h-4 text-red-400" />
               </button>
+            </div>
+          )}
+
+          {/* OCR Scan Rate Confirmation Button */}
+          {!showOcrUpload && !ocrResult && (
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={() => setShowOcrUpload(true)}
+                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl font-medium hover:from-purple-700 hover:to-indigo-700 transition-all shadow-lg hover:shadow-xl"
+              >
+                <FileText className="w-5 h-5" />
+                📄 Scan Rate Confirmation
+              </button>
+            </div>
+          )}
+
+          {/* OCR Upload Section */}
+          {showOcrUpload && !showOcrReview && (
+            <div className="bg-gradient-to-br from-purple-50 to-indigo-50 border-2 border-purple-200 rounded-xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-purple-900 flex items-center gap-2">
+                  <FileText className="w-5 h-5" />
+                  Upload Rate Confirmation
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowOcrUpload(false)}
+                  className="p-1 hover:bg-purple-200 rounded transition-colors"
+                >
+                  <X className="w-5 h-5 text-purple-600" />
+                </button>
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff"
+                onChange={handleOcrFileUpload}
+                disabled={ocrProcessing}
+                className="hidden"
+              />
+
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={ocrProcessing}
+                className={`w-full border-2 border-dashed rounded-xl p-8 text-center transition-all ${
+                  ocrProcessing 
+                    ? 'border-purple-200 bg-purple-50 cursor-wait' 
+                    : 'border-purple-300 hover:border-purple-400 hover:bg-purple-100 cursor-pointer'
+                }`}
+              >
+                {ocrProcessing ? (
+                  <div className="flex flex-col items-center gap-3">
+                    <Loader2 className="w-10 h-10 animate-spin text-purple-600" />
+                    <span className="text-purple-700 font-medium">Scanning document...</span>
+                    <span className="text-sm text-purple-600">This may take a few seconds</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-3">
+                    <Upload className="w-10 h-10 text-purple-600" />
+                    <div>
+                      <p className="text-purple-900 font-medium">Click to upload rate confirmation</p>
+                      <p className="text-sm text-purple-600 mt-1">Supports PDF, JPG, PNG, TIFF</p>
+                    </div>
+                  </div>
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* OCR Review Panel */}
+          {showOcrReview && ocrResult && (
+            <div className="bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200 rounded-xl p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-green-900 flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5" />
+                  Document Scanned Successfully
+                </h3>
+                <button
+                  type="button"
+                  onClick={handleDiscardOcrData}
+                  className="p-1 hover:bg-green-200 rounded transition-colors"
+                >
+                  <X className="w-5 h-5 text-green-600" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <p className="text-sm text-green-700">
+                  Review the extracted data below. You can accept all fields or edit them manually after accepting.
+                </p>
+
+                {/* Extracted Data Summary */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {ocrResult.load_number && (
+                    <div className="bg-white p-3 rounded-lg border border-green-200">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <p className="text-xs text-green-600 font-medium">Load Number</p>
+                          <p className="text-sm text-slate-800 font-semibold mt-1">{ocrResult.load_number}</p>
+                        </div>
+                        {(ocrResult.confidence_scores?.load_number || 0) > 0.7 ? (
+                          <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {ocrResult.rate && (
+                    <div className="bg-white p-3 rounded-lg border border-green-200">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <p className="text-xs text-green-600 font-medium">Rate</p>
+                          <p className="text-sm text-slate-800 font-semibold mt-1">${ocrResult.rate.toFixed(2)}</p>
+                        </div>
+                        {(ocrResult.confidence_scores?.rate || 0) > 0.7 ? (
+                          <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {ocrResult.pickup_date && (
+                    <div className="bg-white p-3 rounded-lg border border-green-200">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <p className="text-xs text-green-600 font-medium">Pickup Date</p>
+                          <p className="text-sm text-slate-800 font-semibold mt-1">{ocrResult.pickup_date}</p>
+                        </div>
+                        {(ocrResult.confidence_scores?.pickup_date || 0) > 0.7 ? (
+                          <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {ocrResult.delivery_date && (
+                    <div className="bg-white p-3 rounded-lg border border-green-200">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <p className="text-xs text-green-600 font-medium">Delivery Date</p>
+                          <p className="text-sm text-slate-800 font-semibold mt-1">{ocrResult.delivery_date}</p>
+                        </div>
+                        {(ocrResult.confidence_scores?.delivery_date || 0) > 0.7 ? (
+                          <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {ocrResult.pickup_city && (
+                    <div className="bg-white p-3 rounded-lg border border-green-200">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <p className="text-xs text-green-600 font-medium">Pickup Location</p>
+                          <p className="text-sm text-slate-800 font-semibold mt-1">
+                            {ocrResult.pickup_city}, {ocrResult.pickup_state} {ocrResult.pickup_zip}
+                          </p>
+                        </div>
+                        {(ocrResult.confidence_scores?.pickup_location || 0) > 0.7 ? (
+                          <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {ocrResult.delivery_city && (
+                    <div className="bg-white p-3 rounded-lg border border-green-200">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <p className="text-xs text-green-600 font-medium">Delivery Location</p>
+                          <p className="text-sm text-slate-800 font-semibold mt-1">
+                            {ocrResult.delivery_city}, {ocrResult.delivery_state} {ocrResult.delivery_zip}
+                          </p>
+                        </div>
+                        {(ocrResult.confidence_scores?.delivery_location || 0) > 0.7 ? (
+                          <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {ocrResult.weight && (
+                    <div className="bg-white p-3 rounded-lg border border-green-200">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <p className="text-xs text-green-600 font-medium">Weight</p>
+                          <p className="text-sm text-slate-800 font-semibold mt-1">{ocrResult.weight} lbs</p>
+                        </div>
+                        {(ocrResult.confidence_scores?.weight || 0) > 0.7 ? (
+                          <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {ocrResult.cargo_description && (
+                    <div className="bg-white p-3 rounded-lg border border-green-200">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <p className="text-xs text-green-600 font-medium">Cargo Description</p>
+                          <p className="text-sm text-slate-800 font-semibold mt-1">{ocrResult.cargo_description}</p>
+                        </div>
+                        {(ocrResult.confidence_scores?.cargo_description || 0) > 0.7 ? (
+                          <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleAcceptOcrData}
+                    className="flex-1 px-6 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle2 className="w-5 h-5" />
+                    Use All Data
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDiscardOcrData}
+                    className="px-6 py-3 bg-slate-200 text-slate-700 rounded-lg font-medium hover:bg-slate-300 transition-colors"
+                  >
+                    Discard
+                  </button>
+                </div>
+
+                {/* Show extracted text (collapsible) */}
+                {ocrText && (
+                  <details className="mt-4">
+                    <summary className="cursor-pointer text-sm text-green-700 font-medium hover:text-green-800">
+                      View extracted text
+                    </summary>
+                    <div className="mt-2 p-3 bg-white rounded-lg border border-green-200">
+                      <pre className="text-xs text-slate-600 whitespace-pre-wrap max-h-40 overflow-y-auto">
+                        {ocrText}
+                      </pre>
+                    </div>
+                  </details>
+                )}
+              </div>
             </div>
           )}
 
