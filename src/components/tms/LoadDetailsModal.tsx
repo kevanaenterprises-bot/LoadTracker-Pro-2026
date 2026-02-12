@@ -597,6 +597,15 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
   const handleSendInvoiceEmail = async () => {
     if (!load) return;
     
+    // Debug logging to diagnose customer email issues
+    console.log('[Invoice Email Debug] Load object:', {
+      loadId: load.id,
+      loadNumber: load.load_number,
+      customerId: load.customer_id,
+      hasCustomerObject: !!load.customer,
+      customerEmail: load.customer?.email || 'NOT LOADED'
+    });
+    
     // Check if customer is assigned to this load
     if (!load.customer_id) {
       setInvoiceEmailResult({ 
@@ -610,25 +619,35 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
     setInvoiceEmailResult(null);
 
     try {
-      // Fetch customer data to verify email exists
-      const { data: customer, error: customerError } = await supabase
-        .from('customers')
-        .select('email, company_name')
-        .eq('id', load.customer_id)
-        .single();
-
-      if (customerError || !customer) {
-        setInvoiceEmailResult({ 
-          success: false, 
-          message: 'Cannot send invoice: Customer not found.' 
-        });
-        return;
+      let customer;
+      
+      // If customer data is already loaded with the load, use it
+      if (load.customer && load.customer.email) {
+        customer = load.customer;
+        console.log('[Invoice Email] Using embedded customer data:', customer.email);
+      } else {
+        // Otherwise fetch it
+        console.log('[Invoice Email] Fetching customer data for ID:', load.customer_id);
+        const { data: customerData, error: customerError } = await supabase
+          .from('customers')
+          .select('email, company_name')
+          .eq('id', load.customer_id)
+          .single();
+        
+        if (customerError || !customerData) {
+          setInvoiceEmailResult({ 
+            success: false, 
+            message: 'Cannot send invoice: Customer not found in database.' 
+          });
+          return;
+        }
+        customer = customerData;
       }
 
       if (!customer.email || customer.email.trim() === '') {
         setInvoiceEmailResult({ 
           success: false, 
-          message: `Cannot send invoice: Customer "${customer.company_name}" has no email address. Please add an email to the customer profile first.` 
+          message: `Cannot send invoice: Customer "${customer.company_name}" (ID: ${load.customer_id}) has no email address in the database. Please edit the customer profile and add an email address.` 
         });
         return;
       }
