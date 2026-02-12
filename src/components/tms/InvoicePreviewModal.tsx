@@ -519,13 +519,15 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
             <div ref={printRef} className="bg-white rounded-lg shadow-lg max-w-[700px] mx-auto">
               <div className="p-8 sm:p-10">
                 {/* Modern Invoice Header with Gradient */}
-                <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 p-8 rounded-t-2xl text-white mb-6 -m-8 sm:-m-10 mb-6">
+                <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 p-8 rounded-t-2xl text-white -m-8 sm:-m-10 mb-6">
                   <div className="flex justify-between items-start">
                     <div>
                       <h1 className="text-4xl font-bold mb-2">INVOICE</h1>
                       <div className="flex items-center gap-2 text-blue-100">
-                        <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                        <span className="text-sm font-medium">Payment Due Upon Receipt</span>
+                        <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" aria-hidden="true"></div>
+                        <span className="text-sm font-medium">
+                          <span className="sr-only">Urgent: </span>Payment Due Upon Receipt
+                        </span>
                       </div>
                     </div>
                     <div className="text-right">
@@ -722,9 +724,9 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                         ${fmt(invoice.amount)}
                       </p>
                       <div className="flex items-center gap-2 mt-3">
-                        <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                        <div className="w-2 h-2 bg-white rounded-full animate-pulse" aria-hidden="true"></div>
                         <p className="text-emerald-50 text-sm font-medium">
-                          Payment Due Immediately
+                          <span className="sr-only">Urgent: </span>Payment Due Immediately
                         </p>
                       </div>
                     </div>
