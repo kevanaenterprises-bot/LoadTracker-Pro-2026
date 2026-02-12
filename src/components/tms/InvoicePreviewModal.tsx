@@ -23,7 +23,7 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
     company_city: 'Melissa',
     company_state: 'TX',
     company_zip: '75454',
-    company_phone: '214-878-1230',
+    company_phone: '903-803-7500',
     company_email: 'accounting@go4fc.com',
   });
   const [loading, setLoading] = useState(false);
@@ -303,8 +303,27 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
   const isAnyTimestampVerified = timestamps.some(t => t.verified);
 
   const handlePrint = () => {
-    const printContent = printRef.current;
-    if (!printContent) return;
+    if (!load || !invoice) return;
+
+    // Format invoice date
+    const invoiceDate = new Date(invoice.created_at).toLocaleDateString('en-US', {
+      month: 'numeric',
+      day: 'numeric',
+      year: 'numeric',
+    });
+
+    // Get destination information
+    const destination = deliveryStops.length > 0
+      ? `${deliveryStops[0].company_name || ''}, ${deliveryStops[0].city} ${deliveryStops[0].state}`
+      : `${load.dest_company || ''}, ${load.dest_city} ${load.dest_state}`;
+
+    const invoiceAmount = fmt(invoice.amount);
+
+    // Format GPS timestamps for print
+    const pickupArrived = formatTimestamp(getTimestamp('pickup', 'arrived'));
+    const pickupDeparted = formatTimestamp(getTimestamp('pickup', 'departed'));
+    const deliveryArrived = formatTimestamp(getTimestamp('delivery', 'arrived'));
+    const deliveryDeparted = formatTimestamp(getTimestamp('delivery', 'departed'));
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
@@ -313,64 +332,292 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Invoice ${invoice?.invoice_number || ''}</title>
+          <title>Invoice ${invoice.invoice_number || ''}</title>
           <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b; padding: 40px; }
+            body { 
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+              color: #1e293b; 
+              padding: 40px; 
+              background: white;
+            }
             .invoice-container { max-width: 800px; margin: 0 auto; }
-            .company-header { text-align: center; margin-bottom: 24px; }
-            .company-name { font-size: 24px; font-weight: 700; color: #2563eb; margin-bottom: 4px; }
-            .company-detail { font-size: 13px; color: #64748b; line-height: 1.6; }
-            .divider { border-top: 1px solid #e2e8f0; margin: 20px 0; }
-            .invoice-meta { display: flex; justify-content: space-between; margin-bottom: 24px; }
-            .invoice-title { font-size: 20px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
+
+            /* Header */
+            .company-header { text-align: center; margin-bottom: 32px; }
+            .company-name { 
+              font-size: 32px; 
+              font-weight: 700; 
+              color: #1e293b;
+              margin-bottom: 12px; 
+              letter-spacing: -0.5px;
+            }
+            .company-details { 
+              font-size: 14px; 
+              color: #64748b; 
+              line-height: 1.8; 
+            }
+
+            /* Horizontal divider */
+            .divider { 
+              border: none;
+              border-top: 2px solid #cbd5e1; 
+              margin: 24px 0; 
+            }
+
+            /* Two-column invoice meta */
+            .invoice-meta { 
+              display: flex; 
+              justify-content: space-between; 
+              align-items: flex-start;
+              margin-bottom: 32px; 
+            }
+            .invoice-left { flex: 1; }
+            .invoice-right { flex: 1; text-align: right; }
+
+            .invoice-number { 
+              font-size: 28px; 
+              font-weight: 700; 
+              color: #1e293b; 
+              margin-bottom: 8px; 
+            }
+            .invoice-date { 
+              font-size: 15px; 
+              color: #475569; 
+              margin-bottom: 4px;
+            }
+
+            .meta-line { 
+              font-size: 15px; 
+              color: #475569; 
+              margin-bottom: 4px;
+              line-height: 1.6;
+            }
             .meta-label { font-weight: 600; color: #1e293b; }
-            .meta-value { color: #475569; }
-            .meta-row { margin-bottom: 4px; font-size: 14px; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
-            th { background: #f1f5f9; padding: 10px 12px; text-align: left; font-weight: 600; font-size: 14px; border: 1px solid #e2e8f0; }
+
+            /* Table */
+            table { 
+              width: 100%; 
+              border-collapse: collapse; 
+              margin-bottom: 32px; 
+            }
+            th { 
+              background: #f1f5f9; 
+              padding: 12px 16px; 
+              text-align: left; 
+              font-weight: 600; 
+              font-size: 15px; 
+              border: 1px solid #cbd5e1; 
+              color: #1e293b;
+            }
             th:last-child { text-align: right; }
-            td { padding: 10px 12px; font-size: 14px; border: 1px solid #e2e8f0; }
-            td:last-child { text-align: right; }
-            .fuel-surcharge-row td { background: #fffbeb; }
-            .subtotal-row td { border-top: 2px solid #e2e8f0; font-weight: 600; }
-            .gps-section { border: 2px solid #bfdbfe; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
-            .gps-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-            .gps-title { font-size: 15px; font-weight: 700; color: #1e293b; }
-            .gps-badge { background: #2563eb; color: white; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; }
-            .gps-note { font-size: 12px; color: #64748b; margin-bottom: 16px; background: #f0f9ff; padding: 8px 12px; border-radius: 4px; }
-            .stop-box { border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; margin-bottom: 10px; }
-            .stop-label { font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 8px; }
-            .stop-label.pickup { color: #2563eb; }
-            .stop-label.delivery { color: #059669; }
-            .time-row { display: flex; gap: 24px; }
+            td { 
+              padding: 12px 16px; 
+              font-size: 14px; 
+              border: 1px solid #cbd5e1; 
+              line-height: 1.6;
+            }
+            td:last-child { 
+              text-align: right; 
+              font-weight: 600;
+              font-size: 15px;
+            }
+
+            /* Fuel surcharge row */
+            .fuel-surcharge-row td {
+              background: #fffbeb;
+            }
+
+            /* GPS Section */
+            .gps-section { 
+              border: 2px solid #cbd5e1; 
+              border-radius: 8px; 
+              padding: 20px; 
+              background: #f8fafc;
+              margin-top: 24px;
+            }
+            .gps-header { 
+              display: flex; 
+              justify-content: space-between; 
+              align-items: center;
+              margin-bottom: 16px;
+            }
+            .gps-title { 
+              font-size: 16px; 
+              font-weight: 700; 
+              color: #1e293b; 
+            }
+            .verified-badge { 
+              font-size: 11px; 
+              font-weight: 600; 
+              color: #10b981; 
+              background: #d1fae5;
+              padding: 4px 12px;
+              border-radius: 4px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            }
+            .gps-disclaimer { 
+              font-size: 12px; 
+              color: #64748b; 
+              margin-bottom: 16px;
+              line-height: 1.5;
+            }
+
+            .location-box { 
+              background: white;
+              border: 1px solid #cbd5e1;
+              border-radius: 6px;
+              padding: 16px;
+              margin-bottom: 12px;
+            }
+            .location-box:last-child { margin-bottom: 0; }
+
+            .location-header { 
+              font-size: 14px; 
+              font-weight: 700; 
+              color: #1e293b; 
+              margin-bottom: 12px;
+              display: flex;
+              align-items: center;
+              gap: 8px;
+            }
+            .location-times { 
+              display: flex; 
+              justify-content: space-between;
+              gap: 16px;
+            }
             .time-col { flex: 1; }
-            .time-label { font-size: 11px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
-            .time-value { font-size: 13px; color: #1e293b; margin-top: 2px; }
-            .time-pending { font-size: 13px; color: #94a3b8; font-style: italic; margin-top: 2px; }
-            .total-row { text-align: right; font-size: 20px; font-weight: 700; color: #2563eb; margin-bottom: 32px; }
-            .pod-section { margin-top: 24px; page-break-before: always; }
-            .pod-image { max-width: 100%; margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 4px; page-break-before: always; page-break-inside: avoid; }
-            .broken-pod { display: none; }
-            @media print { 
-              body { 
-                padding: 20px; 
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
-              } 
-              .no-print { display: none; } 
-              .broken-pod { display: none; }
-              /* Preserve gradients and colors in print */
-              .bg-gradient-to-r,
-              .bg-gradient-to-br {
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
-              }
+            .time-label { 
+              font-size: 12px; 
+              font-weight: 600; 
+              color: #64748b; 
+              text-transform: uppercase;
+              letter-spacing: 0.3px;
+              margin-bottom: 4px;
+            }
+            .time-value { 
+              font-size: 13px; 
+              color: #1e293b; 
+              font-family: 'Monaco', 'Courier New', monospace;
+            }
+
+            @media print {
+              body { padding: 0; }
+              .invoice-container { max-width: 100%; }
             }
           </style>
         </head>
         <body>
-          ${printContent.innerHTML}
+          <div class="invoice-container">
+            <!-- Header -->
+            <div class="company-header">
+              <div class="company-name">${companySettings.company_name}</div>
+              <div class="company-details">
+                ${companySettings.company_address}<br>
+                ${companySettings.company_city}, ${companySettings.company_state} ${companySettings.company_zip}<br>
+                Phone: ${companySettings.company_phone}<br>
+                Email: ${companySettings.company_email}
+              </div>
+            </div>
+
+            <hr class="divider">
+
+            <!-- Two-column invoice meta -->
+            <div class="invoice-meta">
+              <div class="invoice-left">
+                <div class="invoice-number">Invoice ${invoice.invoice_number || 'N/A'}</div>
+                <div class="invoice-date">Date: ${invoiceDate}</div>
+              </div>
+              <div class="invoice-right">
+                <div class="meta-line"><span class="meta-label">Load #:</span> ${load.load_number || 'N/A'}</div>
+                <div class="meta-line"><span class="meta-label">BOL/POD #:</span> ${load.bol_number || 'N/A'}</div>
+                <div class="meta-line"><span class="meta-label">Driver:</span> ${load.driver?.name || 'N/A'}</div>
+              </div>
+            </div>
+
+            <!-- Line items table -->
+            <table>
+              <thead>
+                <tr>
+                  <th>Description</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${showItemized ? `
+                  <tr>
+                    <td>Transportation Services - ${destination} - BOL/POD: ${load.bol_number || 'N/A'}</td>
+                    <td>$${fmt(load.rate || 0)}</td>
+                  </tr>
+                  ${(load.extra_stop_fee || 0) > 0 ? `
+                    <tr>
+                      <td>Extra Stop Fee</td>
+                      <td>$${fmt(load.extra_stop_fee || 0)}</td>
+                    </tr>
+                  ` : ''}
+                  ${(load.lumper_fee || 0) > 0 ? `
+                    <tr>
+                      <td>Lumper Fee</td>
+                      <td>$${fmt(load.lumper_fee || 0)}</td>
+                    </tr>
+                  ` : ''}
+                  <tr class="fuel-surcharge-row">
+                    <td>Fuel Surcharge${miles > 0 ? ` (${miles.toLocaleString()} mi × $${perMileRate.toFixed(4)}/mi)` : ''}</td>
+                    <td>$${fmt(fuelSurchargeAmount)}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td>Transportation Services - ${destination} - BOL/POD: ${load.bol_number || 'N/A'}</td>
+                    <td>$${invoiceAmount}</td>
+                  </tr>
+                `}
+              </tbody>
+            </table>
+
+            <!-- GPS section (only if timestamps exist) -->
+            ${timestamps.length > 0 ? `
+              <div class="gps-section">
+                <div class="gps-header">
+                  <div class="gps-title">GPS-Verified Arrival & Departure Times</div>
+                  <div class="verified-badge">GEOFENCE VERIFIED</div>
+                </div>
+                <div class="gps-disclaimer">
+                  Times recorded automatically via GPS geofencing technology. No manual driver input - legally verifiable timestamps.
+                </div>
+                
+                <!-- Pickup location box -->
+                <div class="location-box">
+                  <div class="location-header">📦 SHIPPER / PICKUP LOCATION</div>
+                  <div class="location-times">
+                    <div class="time-col">
+                      <div class="time-label">ARRIVED (IN)</div>
+                      <div class="time-value">${pickupArrived || 'Pending GPS verification'}</div>
+                    </div>
+                    <div class="time-col">
+                      <div class="time-label">DEPARTED (OUT)</div>
+                      <div class="time-value">${pickupDeparted || 'Pending GPS verification'}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Delivery location box -->
+                <div class="location-box">
+                  <div class="location-header">📍 RECEIVER / DELIVERY LOCATION</div>
+                  <div class="location-times">
+                    <div class="time-col">
+                      <div class="time-label">ARRIVED (IN)</div>
+                      <div class="time-value">${deliveryArrived || 'Pending GPS verification'}</div>
+                    </div>
+                    <div class="time-col">
+                      <div class="time-label">DEPARTED (OUT)</div>
+                      <div class="time-value">${deliveryDeparted || 'Pending GPS verification'}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ` : ''}
+          </div>
         </body>
       </html>
     `);
