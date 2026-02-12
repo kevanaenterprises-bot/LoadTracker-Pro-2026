@@ -221,7 +221,7 @@ const AppLayout: React.FC = () => {
     
     const { data: loadsData } = await supabase
       .from('loads')
-      .select('*, driver:drivers(*)')
+      .select('*, customer:customers(*), driver:drivers(*)')
       .neq('status', 'PAID')
       .order('delivery_date', { ascending: true });
     

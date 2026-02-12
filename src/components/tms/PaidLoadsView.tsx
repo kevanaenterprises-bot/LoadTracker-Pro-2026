@@ -36,7 +36,7 @@ const PaidLoadsView: React.FC<PaidLoadsViewProps> = ({ onBack }) => {
     setLoading(true);
     const { data } = await supabase
       .from('loads')
-      .select('*, driver:drivers(*)')
+      .select('*, customer:customers(*), driver:drivers(*)')
       .eq('status', 'PAID')
       .order('created_at', { ascending: false });
 
