@@ -60,7 +60,7 @@ This feature allows users to quickly create loads by scanning rate confirmation 
 ### Scanning a Rate Confirmation
 
 1. Click the **"Create New Load"** button
-2. Click the **"📄 Scan Rate Confirmation"** button at the top of the form
+2. Click the **"Scan Rate Confirmation"** button at the top of the form
 3. Upload your rate confirmation document (PDF, JPG, PNG, or TIFF)
 4. Wait for the document to be scanned (usually 3-5 seconds)
 5. Review the extracted data in the preview panel

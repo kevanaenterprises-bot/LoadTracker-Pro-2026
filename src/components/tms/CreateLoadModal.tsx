@@ -468,6 +468,11 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
         // Save OCR training data if OCR was used
         if (ocrResult && ocrText) {
           try {
+            // Handle rate conversion properly - if user entered 0 explicitly, use it
+            const finalRate = formData.manual_rate 
+              ? parseFloat(formData.manual_rate) 
+              : (ocrResult.rate || undefined);
+            
             await saveOcrTrainingData({
               load_id: loadData.id,
               original_text: ocrText,
@@ -476,7 +481,7 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
                 load_number: formData.load_number,
                 pickup_date: formData.pickup_date,
                 delivery_date: formData.delivery_date,
-                rate: parseFloat(formData.manual_rate) || ocrResult.rate,
+                rate: finalRate,
                 weight: formData.weight,
                 cargo_description: formData.cargo_description,
                 pickup_company: pickupStops[0]?.company_name,

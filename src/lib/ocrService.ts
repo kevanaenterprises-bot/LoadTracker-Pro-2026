@@ -270,13 +270,18 @@ function normalizeDate(dateStr: string): string {
   return dateStr; // Return as-is if can't parse
 }
 
+export interface TrainingPattern {
+  extracted_data: ParsedRateConData;
+  corrected_data: ParsedRateConData;
+}
+
 /**
  * Apply learned patterns from training data
  */
 function applyTrainingPatterns(
   parsed: ParsedRateConData,
   text: string,
-  patterns: any[]
+  patterns: TrainingPattern[]
 ): void {
   // This is a placeholder for future ML/pattern matching improvements
   // For now, we'll keep it simple, but this is where we'd apply
@@ -290,7 +295,7 @@ function applyTrainingPatterns(
 /**
  * Get historical training patterns to improve parsing
  */
-export async function getTrainingPatterns(): Promise<any[]> {
+export async function getTrainingPatterns(): Promise<TrainingPattern[]> {
   try {
     // Fetch recent training data to identify patterns
     const { data, error } = await supabase
@@ -304,7 +309,7 @@ export async function getTrainingPatterns(): Promise<any[]> {
       return [];
     }
 
-    return data || [];
+    return (data || []) as TrainingPattern[];
   } catch (error) {
     console.warn('Error fetching training patterns:', error);
     return [];
