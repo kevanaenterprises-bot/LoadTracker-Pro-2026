@@ -656,7 +656,6 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
 
       // Add a 30-second timeout to the edge function call
       const timeoutId = setTimeout(() => {
-        if (abortController.signal.aborted) return;
         abortController.abort(new Error('Request timed out after 30 seconds'));
       }, 30000);
 
@@ -664,8 +663,6 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
         const { data, error } = await supabase.functions.invoke('send-invoice-email', {
           body: { load_id: load.id },
         });
-
-        clearTimeout(timeoutId);
         
         // Check if request was aborted
         if (abortController.signal.aborted) {
