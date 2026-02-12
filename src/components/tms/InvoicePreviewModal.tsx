@@ -523,14 +523,37 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                   <div className="flex justify-between items-start">
                     <div>
                       <h1 className="text-4xl font-bold mb-2">INVOICE</h1>
-                      <div className="flex items-center gap-2 text-blue-100">
-                        <div className="w-2 h-2 bg-green-400 rounded-full motion-safe:animate-pulse" aria-hidden="true"></div>
-                        <span className="text-sm font-medium">
-                          <span className="sr-only">Urgent: </span>Payment Due Upon Receipt
-                        </span>
-                      </div>
                     </div>
-                    <div className="text-right">
+                    <div className="flex items-center gap-6">
+                      {/* Bill To with Modern Card */}
+                      <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 border-2 border-amber-200 shadow-lg">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-9 h-9 bg-amber-500 rounded-lg flex items-center justify-center">
+                            <span className="text-white font-bold text-base">
+                              {customer?.company_name?.charAt(0) || load.dest_company?.charAt(0) || '?'}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="text-xs text-amber-600 uppercase tracking-wider font-semibold">Bill To</p>
+                            <h3 className="text-base font-bold text-slate-900">
+                              {customer?.company_name || load.dest_company}
+                            </h3>
+                          </div>
+                        </div>
+                        <div className="space-y-1 text-sm text-slate-700">
+                          {customer ? (
+                            <>
+                              <p>{customer.billing_address}</p>
+                              <p>{customer.billing_city}, {customer.billing_state} {customer.billing_zip}</p>
+                              <p className="font-medium text-amber-700">{customer.email}</p>
+                              <p className="font-medium text-amber-700">{customer.phone}</p>
+                            </>
+                          ) : (
+                            <p className="text-slate-500 italic">Customer details not available</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right">
                       <div className="bg-white/20 backdrop-blur-sm rounded-lg px-4 py-2 mb-2">
                         <p className="text-xs text-blue-100 mb-1">Invoice Number</p>
                         <p className="text-2xl font-bold">#{invoice.invoice_number}</p>
@@ -542,13 +565,14 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                           year: 'numeric' 
                         })}
                       </p>
+                      </div>
                     </div>
                   </div>
                 </div>
 
                 {/* Company Info with Visual Card */}
-                <div className="grid grid-cols-2 gap-6 mb-6">
-                  <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-5 border-2 border-slate-200">
+                <div className="mb-6">
+                  <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-5 border-2 border-slate-200 max-w-md">
                     <div className="flex items-center gap-2 mb-3">
                       <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
                         <span className="text-white font-bold text-lg">
@@ -565,35 +589,6 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                       <p>{companySettings.company_city}, {companySettings.company_state} {companySettings.company_zip}</p>
                       <p className="font-medium text-blue-600">{companySettings.company_phone}</p>
                       <p className="font-medium text-blue-600">{companySettings.company_email}</p>
-                    </div>
-                  </div>
-
-                  {/* Bill To with Modern Card */}
-                  <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-5 border-2 border-amber-200">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="w-10 h-10 bg-amber-500 rounded-lg flex items-center justify-center">
-                        <span className="text-white font-bold text-lg">
-                          {customer?.company_name?.charAt(0) || load.dest_company?.charAt(0) || '?'}
-                        </span>
-                      </div>
-                      <div>
-                        <p className="text-xs text-amber-600 uppercase tracking-wider font-semibold">Bill To</p>
-                        <h3 className="text-lg font-bold text-slate-900">
-                          {customer?.company_name || load.dest_company}
-                        </h3>
-                      </div>
-                    </div>
-                    <div className="space-y-1 text-sm text-slate-700">
-                      {customer ? (
-                        <>
-                          <p>{customer.billing_address}</p>
-                          <p>{customer.billing_city}, {customer.billing_state} {customer.billing_zip}</p>
-                          <p className="font-medium text-amber-700">{customer.email}</p>
-                          <p className="font-medium text-amber-700">{customer.phone}</p>
-                        </>
-                      ) : (
-                        <p className="text-slate-500 italic">Customer details not available</p>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -723,12 +718,6 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                       <p className="text-5xl font-black text-white drop-shadow-lg">
                         ${fmt(invoice.amount)}
                       </p>
-                      <div className="flex items-center gap-2 mt-3">
-                        <div className="w-2 h-2 bg-white rounded-full motion-safe:animate-pulse" aria-hidden="true"></div>
-                        <p className="text-emerald-50 text-sm font-medium">
-                          <span className="sr-only">Urgent: </span>Payment Due Immediately
-                        </p>
-                      </div>
                     </div>
                     <div className="text-right">
                       <div className="bg-white/20 backdrop-blur-sm rounded-lg px-4 py-3">
@@ -820,177 +809,184 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                     </p>
                   </div>
 
-                  {/* Shipper / Pickup Location(s) */}
-                  {pickupStops.length > 0 ? (
-                    pickupStops.map((stop, idx) => {
-                      const arrivedTs = getTimestamp('pickup', 'arrived', stop.id);
-                      const departedTs = getTimestamp('pickup', 'departed', stop.id);
-                      return (
-                        <div key={stop.id} className="border border-slate-200 rounded-md p-3 mb-3">
+                  {/* Two-column layout for Shipper and Receiver */}
+                  <div className="grid grid-cols-2 gap-4">
+                    {/* Left column: Shipper / Pickup Location(s) */}
+                    <div>
+                      {pickupStops.length > 0 ? (
+                        pickupStops.map((stop, idx) => {
+                          const arrivedTs = getTimestamp('pickup', 'arrived', stop.id);
+                          const departedTs = getTimestamp('pickup', 'departed', stop.id);
+                          return (
+                            <div key={stop.id} className="border border-slate-200 rounded-md p-3 mb-3">
+                              <div className="flex items-center gap-2 mb-2">
+                                <MapPin className="w-3.5 h-3.5 text-blue-600" />
+                                <span className="text-xs font-bold text-blue-600 uppercase">
+                                  Shipper / Pickup Location{pickupStops.length > 1 ? ` ${idx + 1}` : ''}
+                                </span>
+                              </div>
+                              {stop.company_name && (
+                                <p className="text-xs text-slate-500 mb-2 ml-5">
+                                  {stop.company_name} - {stop.city}, {stop.state}
+                                </p>
+                              )}
+                              <div className="flex gap-6 ml-5">
+                                <div className="flex-1">
+                                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Arrived (In)</p>
+                                  {arrivedTs ? (
+                                    <p className="text-xs text-slate-700 mt-0.5 font-medium">
+                                      {formatTimestamp(arrivedTs)}
+                                      {arrivedTs.verified && <ShieldCheck className="w-3 h-3 text-green-500 inline ml-1" />}
+                                    </p>
+                                  ) : (
+                                    <p className="text-xs text-slate-400 italic mt-0.5">Pending GPS verification</p>
+                                  )}
+                                </div>
+                                <div className="flex-1">
+                                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Departed (Out)</p>
+                                  {departedTs ? (
+                                    <p className="text-xs text-slate-700 mt-0.5 font-medium">
+                                      {formatTimestamp(departedTs)}
+                                      {departedTs.verified && <ShieldCheck className="w-3 h-3 text-green-500 inline ml-1" />}
+                                    </p>
+                                  ) : (
+                                    <p className="text-xs text-slate-400 italic mt-0.5">Pending GPS verification</p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="border border-slate-200 rounded-md p-3 mb-3">
                           <div className="flex items-center gap-2 mb-2">
                             <MapPin className="w-3.5 h-3.5 text-blue-600" />
-                            <span className="text-xs font-bold text-blue-600 uppercase">
-                              Shipper / Pickup Location{pickupStops.length > 1 ? ` ${idx + 1}` : ''}
-                            </span>
+                            <span className="text-xs font-bold text-blue-600 uppercase">Shipper / Pickup Location</span>
                           </div>
-                          {stop.company_name && (
-                            <p className="text-xs text-slate-500 mb-2 ml-5">
-                              {stop.company_name} - {stop.city}, {stop.state}
-                            </p>
-                          )}
+                          <p className="text-xs text-slate-500 mb-2 ml-5">{load.origin_city}, {load.origin_state}</p>
                           <div className="flex gap-6 ml-5">
                             <div className="flex-1">
                               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Arrived (In)</p>
-                              {arrivedTs ? (
-                                <p className="text-xs text-slate-700 mt-0.5 font-medium">
-                                  {formatTimestamp(arrivedTs)}
-                                  {arrivedTs.verified && <ShieldCheck className="w-3 h-3 text-green-500 inline ml-1" />}
-                                </p>
-                              ) : (
-                                <p className="text-xs text-slate-400 italic mt-0.5">Pending GPS verification</p>
-                              )}
+                              {(() => {
+                                const ts = getTimestamp('pickup', 'arrived');
+                                return ts ? (
+                                  <p className="text-xs text-slate-700 mt-0.5 font-medium">
+                                    {formatTimestamp(ts)}
+                                    {ts.verified && <ShieldCheck className="w-3 h-3 text-green-500 inline ml-1" />}
+                                  </p>
+                                ) : (
+                                  <p className="text-xs text-slate-400 italic mt-0.5">Pending GPS verification</p>
+                                );
+                              })()}
                             </div>
                             <div className="flex-1">
                               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Departed (Out)</p>
-                              {departedTs ? (
-                                <p className="text-xs text-slate-700 mt-0.5 font-medium">
-                                  {formatTimestamp(departedTs)}
-                                  {departedTs.verified && <ShieldCheck className="w-3 h-3 text-green-500 inline ml-1" />}
-                                </p>
-                              ) : (
-                                <p className="text-xs text-slate-400 italic mt-0.5">Pending GPS verification</p>
-                              )}
+                              {(() => {
+                                const ts = getTimestamp('pickup', 'departed');
+                                return ts ? (
+                                  <p className="text-xs text-slate-700 mt-0.5 font-medium">
+                                    {formatTimestamp(ts)}
+                                    {ts.verified && <ShieldCheck className="w-3 h-3 text-green-500 inline ml-1" />}
+                                  </p>
+                                ) : (
+                                  <p className="text-xs text-slate-400 italic mt-0.5">Pending GPS verification</p>
+                                );
+                              })()}
                             </div>
                           </div>
                         </div>
-                      );
-                    })
-                  ) : (
-                    <div className="border border-slate-200 rounded-md p-3 mb-3">
-                      <div className="flex items-center gap-2 mb-2">
-                        <MapPin className="w-3.5 h-3.5 text-blue-600" />
-                        <span className="text-xs font-bold text-blue-600 uppercase">Shipper / Pickup Location</span>
-                      </div>
-                      <p className="text-xs text-slate-500 mb-2 ml-5">{load.origin_city}, {load.origin_state}</p>
-                      <div className="flex gap-6 ml-5">
-                        <div className="flex-1">
-                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Arrived (In)</p>
-                          {(() => {
-                            const ts = getTimestamp('pickup', 'arrived');
-                            return ts ? (
-                              <p className="text-xs text-slate-700 mt-0.5 font-medium">
-                                {formatTimestamp(ts)}
-                                {ts.verified && <ShieldCheck className="w-3 h-3 text-green-500 inline ml-1" />}
-                              </p>
-                            ) : (
-                              <p className="text-xs text-slate-400 italic mt-0.5">Pending GPS verification</p>
-                            );
-                          })()}
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Departed (Out)</p>
-                          {(() => {
-                            const ts = getTimestamp('pickup', 'departed');
-                            return ts ? (
-                              <p className="text-xs text-slate-700 mt-0.5 font-medium">
-                                {formatTimestamp(ts)}
-                                {ts.verified && <ShieldCheck className="w-3 h-3 text-green-500 inline ml-1" />}
-                              </p>
-                            ) : (
-                              <p className="text-xs text-slate-400 italic mt-0.5">Pending GPS verification</p>
-                            );
-                          })()}
-                        </div>
-                      </div>
+                      )}
                     </div>
-                  )}
 
-                  {/* Receiver / Delivery Location(s) */}
-                  {deliveryStops.length > 0 ? (
-                    deliveryStops.map((stop, idx) => {
-                      const arrivedTs = getTimestamp('delivery', 'arrived', stop.id);
-                      const departedTs = getTimestamp('delivery', 'departed', stop.id);
-                      return (
-                        <div key={stop.id} className="border border-slate-200 rounded-md p-3 mb-3 last:mb-0">
+                    {/* Right column: Receiver / Delivery Location(s) */}
+                    <div>
+                      {deliveryStops.length > 0 ? (
+                        deliveryStops.map((stop, idx) => {
+                          const arrivedTs = getTimestamp('delivery', 'arrived', stop.id);
+                          const departedTs = getTimestamp('delivery', 'departed', stop.id);
+                          return (
+                            <div key={stop.id} className="border border-slate-200 rounded-md p-3 mb-3 last:mb-0">
+                              <div className="flex items-center gap-2 mb-2">
+                                <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                                <span className="text-xs font-bold text-emerald-600 uppercase">
+                                  Receiver / Delivery Location{deliveryStops.length > 1 ? ` ${idx + 1}` : ''}
+                                </span>
+                              </div>
+                              {stop.company_name && (
+                                <p className="text-xs text-slate-500 mb-2 ml-5">
+                                  {stop.company_name} - {stop.city}, {stop.state}
+                                </p>
+                              )}
+                              <div className="flex gap-6 ml-5">
+                                <div className="flex-1">
+                                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Arrived (In)</p>
+                                  {arrivedTs ? (
+                                    <p className="text-xs text-slate-700 mt-0.5 font-medium">
+                                      {formatTimestamp(arrivedTs)}
+                                      {arrivedTs.verified && <ShieldCheck className="w-3 h-3 text-green-500 inline ml-1" />}
+                                    </p>
+                                  ) : (
+                                    <p className="text-xs text-slate-400 italic mt-0.5">Pending GPS verification</p>
+                                  )}
+                                </div>
+                                <div className="flex-1">
+                                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Departed (Out)</p>
+                                  {departedTs ? (
+                                    <p className="text-xs text-slate-700 mt-0.5 font-medium">
+                                      {formatTimestamp(departedTs)}
+                                      {departedTs.verified && <ShieldCheck className="w-3 h-3 text-green-500 inline ml-1" />}
+                                    </p>
+                                  ) : (
+                                    <p className="text-xs text-slate-400 italic mt-0.5">Pending GPS verification</p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="border border-slate-200 rounded-md p-3">
                           <div className="flex items-center gap-2 mb-2">
                             <MapPin className="w-3.5 h-3.5 text-emerald-600" />
-                            <span className="text-xs font-bold text-emerald-600 uppercase">
-                              Receiver / Delivery Location{deliveryStops.length > 1 ? ` ${idx + 1}` : ''}
-                            </span>
+                            <span className="text-xs font-bold text-emerald-600 uppercase">Receiver / Delivery Location</span>
                           </div>
-                          {stop.company_name && (
-                            <p className="text-xs text-slate-500 mb-2 ml-5">
-                              {stop.company_name} - {stop.city}, {stop.state}
-                            </p>
-                          )}
+                          <p className="text-xs text-slate-500 mb-2 ml-5">
+                            {load.dest_company && `${load.dest_company} - `}{load.dest_city}, {load.dest_state}
+                          </p>
                           <div className="flex gap-6 ml-5">
                             <div className="flex-1">
                               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Arrived (In)</p>
-                              {arrivedTs ? (
-                                <p className="text-xs text-slate-700 mt-0.5 font-medium">
-                                  {formatTimestamp(arrivedTs)}
-                                  {arrivedTs.verified && <ShieldCheck className="w-3 h-3 text-green-500 inline ml-1" />}
-                                </p>
-                              ) : (
-                                <p className="text-xs text-slate-400 italic mt-0.5">Pending GPS verification</p>
-                              )}
+                              {(() => {
+                                const ts = getTimestamp('delivery', 'arrived');
+                                return ts ? (
+                                  <p className="text-xs text-slate-700 mt-0.5 font-medium">
+                                    {formatTimestamp(ts)}
+                                    {ts.verified && <ShieldCheck className="w-3 h-3 text-green-500 inline ml-1" />}
+                                  </p>
+                                ) : (
+                                  <p className="text-xs text-slate-400 italic mt-0.5">Pending GPS verification</p>
+                                );
+                              })()}
                             </div>
                             <div className="flex-1">
                               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Departed (Out)</p>
-                              {departedTs ? (
-                                <p className="text-xs text-slate-700 mt-0.5 font-medium">
-                                  {formatTimestamp(departedTs)}
-                                  {departedTs.verified && <ShieldCheck className="w-3 h-3 text-green-500 inline ml-1" />}
-                                </p>
-                              ) : (
-                                <p className="text-xs text-slate-400 italic mt-0.5">Pending GPS verification</p>
-                              )}
+                              {(() => {
+                                const ts = getTimestamp('delivery', 'departed');
+                                return ts ? (
+                                  <p className="text-xs text-slate-700 mt-0.5 font-medium">
+                                    {formatTimestamp(ts)}
+                                    {ts.verified && <ShieldCheck className="w-3 h-3 text-green-500 inline ml-1" />}
+                                  </p>
+                                ) : (
+                                  <p className="text-xs text-slate-400 italic mt-0.5">Pending GPS verification</p>
+                                );
+                              })()}
                             </div>
                           </div>
                         </div>
-                      );
-                    })
-                  ) : (
-                    <div className="border border-slate-200 rounded-md p-3">
-                      <div className="flex items-center gap-2 mb-2">
-                        <MapPin className="w-3.5 h-3.5 text-emerald-600" />
-                        <span className="text-xs font-bold text-emerald-600 uppercase">Receiver / Delivery Location</span>
-                      </div>
-                      <p className="text-xs text-slate-500 mb-2 ml-5">
-                        {load.dest_company && `${load.dest_company} - `}{load.dest_city}, {load.dest_state}
-                      </p>
-                      <div className="flex gap-6 ml-5">
-                        <div className="flex-1">
-                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Arrived (In)</p>
-                          {(() => {
-                            const ts = getTimestamp('delivery', 'arrived');
-                            return ts ? (
-                              <p className="text-xs text-slate-700 mt-0.5 font-medium">
-                                {formatTimestamp(ts)}
-                                {ts.verified && <ShieldCheck className="w-3 h-3 text-green-500 inline ml-1" />}
-                              </p>
-                            ) : (
-                              <p className="text-xs text-slate-400 italic mt-0.5">Pending GPS verification</p>
-                            );
-                          })()}
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Departed (Out)</p>
-                          {(() => {
-                            const ts = getTimestamp('delivery', 'departed');
-                            return ts ? (
-                              <p className="text-xs text-slate-700 mt-0.5 font-medium">
-                                {formatTimestamp(ts)}
-                                {ts.verified && <ShieldCheck className="w-3 h-3 text-green-500 inline ml-1" />}
-                              </p>
-                            ) : (
-                              <p className="text-xs text-slate-400 italic mt-0.5">Pending GPS verification</p>
-                            );
-                          })()}
-                        </div>
-                      </div>
+                      )}
                     </div>
-                  )}
+                  </div>
                 </div>
 
                 {/* POD Documents */}
