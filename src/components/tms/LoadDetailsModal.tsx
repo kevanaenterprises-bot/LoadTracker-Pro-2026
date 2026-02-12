@@ -80,6 +80,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
   const [generatingInvoice, setGeneratingInvoice] = useState(false);
   const [sendingInvoiceEmail, setSendingInvoiceEmail] = useState(false);
   const [invoiceEmailResult, setInvoiceEmailResult] = useState<{ success: boolean; message: string } | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
 
   // Track the current load ID to prevent stale async operations
@@ -649,48 +650,68 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
       console.log('[Invoice Email] Customer email:', customer?.email);
       console.log('[Invoice Email] Invoice ID:', invoice?.id);
 
+      // Create abort controller for cancellation support
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+
       // Add a 30-second timeout to the edge function call
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Request timed out after 30 seconds')), 30000)
-      );
+      const timeoutId = setTimeout(() => {
+        if (abortController.signal.aborted) return;
+        abortController.abort(new Error('Request timed out after 30 seconds'));
+      }, 30000);
 
-      const invokePromise = supabase.functions.invoke('send-invoice-email', {
-        body: { load_id: load.id },
-      });
-
-      const { data, error } = await Promise.race([invokePromise, timeoutPromise]) as any;
-
-      if (error) {
-        console.error('[Invoice Email] Error:', error);
-        setInvoiceEmailResult({ 
-          success: false, 
-          message: `Failed to send: ${error.message || 'Unknown error'}` 
+      try {
+        const { data, error } = await supabase.functions.invoke('send-invoice-email', {
+          body: { load_id: load.id },
         });
-      } else if (data?.success) {
-        setInvoiceEmailResult({ 
-          success: true, 
-          message: data.message || `Invoice sent to ${data.emailed_to}` 
-        });
-        // Update local invoice state with email info
-        if (invoice) {
-          setInvoice({ ...invoice, emailed_at: data.emailed_at, emailed_to: data.emailed_to });
+
+        clearTimeout(timeoutId);
+        
+        // Check if request was aborted
+        if (abortController.signal.aborted) {
+          const abortReason = abortController.signal.reason;
+          throw abortReason || new Error('Request cancelled');
         }
-      } else {
-        setInvoiceEmailResult({ 
-          success: false, 
-          message: data?.error || 'Failed to send invoice email' 
-        });
+
+        if (error) {
+          console.error('[Invoice Email] Error:', error);
+          setInvoiceEmailResult({ 
+            success: false, 
+            message: `Failed to send: ${error.message || 'Unknown error'}` 
+          });
+        } else if (data?.success) {
+          setInvoiceEmailResult({ 
+            success: true, 
+            message: data.message || `Invoice sent to ${data.emailed_to}` 
+          });
+          // Update local invoice state with email info
+          if (invoice) {
+            setInvoice({ ...invoice, emailed_at: data.emailed_at, emailed_to: data.emailed_to });
+          }
+        } else {
+          setInvoiceEmailResult({ 
+            success: false, 
+            message: data?.error || 'Failed to send invoice email' 
+          });
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        abortControllerRef.current = null;
       }
     } catch (err: any) {
       console.error('[Invoice Email] Exception:', err);
+      
       setInvoiceEmailResult({ 
         success: false, 
         message: err.message === 'Request timed out after 30 seconds' 
           ? 'Email request timed out. Please check your Resend configuration in Settings and try again.' 
+          : err.message === 'Request cancelled'
+          ? 'Email send cancelled by user'
           : `Error: ${err.message || 'Failed to send invoice'}` 
       });
     } finally {
       setSendingInvoiceEmail(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -1466,11 +1487,10 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                         {sendingInvoiceEmail && (
                           <button
                             onClick={() => {
-                              setSendingInvoiceEmail(false);
-                              setInvoiceEmailResult({ 
-                                success: false, 
-                                message: 'Email send cancelled by user' 
-                              });
+                              // Abort the in-flight request if it exists
+                              if (abortControllerRef.current) {
+                                abortControllerRef.current.abort(new Error('Request cancelled'));
+                              }
                             }}
                             className="px-3 py-2 text-sm font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors"
                           >
