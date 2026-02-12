@@ -80,6 +80,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
   const [generatingInvoice, setGeneratingInvoice] = useState(false);
   const [sendingInvoiceEmail, setSendingInvoiceEmail] = useState(false);
   const [invoiceEmailResult, setInvoiceEmailResult] = useState<{ success: boolean; message: string } | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
 
   // Track the current load ID to prevent stale async operations
@@ -644,28 +645,70 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
       // All validations passed, now set loading state and call the edge function
       setSendingInvoiceEmail(true);
 
-      const { data, error } = await supabase.functions.invoke('send-invoice-email', {
-        body: { load_id: load.id },
-      });
+      // Add detailed logging for debugging
+      console.log('[Invoice Email] Starting send for load:', load.id);
+      console.log('[Invoice Email] Customer email:', customer?.email);
+      console.log('[Invoice Email] Invoice ID:', invoice?.id);
 
-      if (error) {
-        setInvoiceEmailResult({ success: false, message: error.message || 'Failed to send invoice' });
-      } else if (data?.success) {
-        setInvoiceEmailResult({ 
-          success: true, 
-          message: data.message || `Invoice sent to ${data.emailed_to}` 
+      // Create abort controller for cancellation support
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+
+      // Add a 30-second timeout to the edge function call
+      const timeoutId = setTimeout(() => {
+        abortController.abort(new Error('Request timed out after 30 seconds'));
+      }, 30000);
+
+      try {
+        const { data, error } = await supabase.functions.invoke('send-invoice-email', {
+          body: { load_id: load.id },
         });
-        // Update local invoice state with email info
-        if (invoice) {
-          setInvoice({ ...invoice, emailed_at: data.emailed_at, emailed_to: data.emailed_to });
+        
+        // Check if request was aborted
+        if (abortController.signal.aborted) {
+          const abortReason = abortController.signal.reason;
+          throw abortReason || new Error('Request cancelled');
         }
-      } else {
-        setInvoiceEmailResult({ success: false, message: data?.error || 'Failed to send invoice' });
+
+        if (error) {
+          console.error('[Invoice Email] Error:', error);
+          setInvoiceEmailResult({ 
+            success: false, 
+            message: `Failed to send: ${error.message || 'Unknown error'}` 
+          });
+        } else if (data?.success) {
+          setInvoiceEmailResult({ 
+            success: true, 
+            message: data.message || `Invoice sent to ${data.emailed_to}` 
+          });
+          // Update local invoice state with email info
+          if (invoice) {
+            setInvoice({ ...invoice, emailed_at: data.emailed_at, emailed_to: data.emailed_to });
+          }
+        } else {
+          setInvoiceEmailResult({ 
+            success: false, 
+            message: data?.error || 'Failed to send invoice email' 
+          });
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        abortControllerRef.current = null;
       }
     } catch (err: any) {
-      setInvoiceEmailResult({ success: false, message: err.message || 'Failed to send invoice' });
+      console.error('[Invoice Email] Exception:', err);
+      
+      setInvoiceEmailResult({ 
+        success: false, 
+        message: err.message === 'Request timed out after 30 seconds' 
+          ? 'Email request timed out. Please check your Resend configuration in Settings and try again.' 
+          : err.message === 'Request cancelled'
+          ? 'Email send cancelled by user'
+          : `Error: ${err.message || 'Failed to send invoice'}` 
+      });
     } finally {
       setSendingInvoiceEmail(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -1428,14 +1471,30 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                         <Eye className="w-4 h-4" />
                         Preview Invoice
                       </button>
-                      <button
-                        onClick={handleSendInvoiceEmail}
-                        disabled={sendingInvoiceEmail}
-                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                      >
-                        {sendingInvoiceEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
-                        {sendingInvoiceEmail ? 'Sending...' : invoice.emailed_at ? 'Resend to Customer' : 'Send to Customer'}
-                      </button>
+                      <div className="flex gap-2 flex-1">
+                        <button
+                          onClick={handleSendInvoiceEmail}
+                          disabled={sendingInvoiceEmail}
+                          className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                        >
+                          {sendingInvoiceEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                          {sendingInvoiceEmail ? 'Sending...' : invoice.emailed_at ? 'Resend to Customer' : 'Send to Customer'}
+                        </button>
+                        
+                        {sendingInvoiceEmail && (
+                          <button
+                            onClick={() => {
+                              // Abort the in-flight request if it exists
+                              if (abortControllerRef.current) {
+                                abortControllerRef.current.abort(new Error('Request cancelled'));
+                              }
+                            }}
+                            className="px-3 py-2 text-sm font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
