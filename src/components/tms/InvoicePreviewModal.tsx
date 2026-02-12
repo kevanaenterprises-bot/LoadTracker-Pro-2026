@@ -524,7 +524,7 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                     <div>
                       <h1 className="text-4xl font-bold mb-2">INVOICE</h1>
                       <div className="flex items-center gap-2 text-blue-100">
-                        <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" aria-hidden="true"></div>
+                        <div className="w-2 h-2 bg-green-400 rounded-full motion-safe:animate-pulse" aria-hidden="true"></div>
                         <span className="text-sm font-medium">
                           <span className="sr-only">Urgent: </span>Payment Due Upon Receipt
                         </span>
@@ -724,7 +724,7 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                         ${fmt(invoice.amount)}
                       </p>
                       <div className="flex items-center gap-2 mt-3">
-                        <div className="w-2 h-2 bg-white rounded-full animate-pulse" aria-hidden="true"></div>
+                        <div className="w-2 h-2 bg-white rounded-full motion-safe:animate-pulse" aria-hidden="true"></div>
                         <p className="text-emerald-50 text-sm font-medium">
                           <span className="sr-only">Urgent: </span>Payment Due Immediately
                         </p>
