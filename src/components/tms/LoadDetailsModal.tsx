@@ -79,7 +79,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
   // Invoice generation & email sending state
   const [generatingInvoice, setGeneratingInvoice] = useState(false);
   const [sendingInvoiceEmail, setSendingInvoiceEmail] = useState(false);
-  const [invoiceEmailResult, setInvoiceEmailResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [invoiceEmailResult, setInvoiceEmailResult] = useState<{ success: boolean; message: string; canRetry?: boolean } | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
 
@@ -671,12 +671,33 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
         }
 
         if (error) {
-          console.error('[Invoice Email] Error:', error);
+          console.error('[Invoice Email] Edge Function Error:', {
+            loadId: load.id,
+            invoiceId: invoice?.id,
+            error: error,
+            message: error.message
+          });
+          
+          // Determine if this is a network/connectivity error
+          const isNetworkError = error.message?.toLowerCase().includes('network') || 
+                                 error.message?.toLowerCase().includes('fetch') ||
+                                 error.message?.toLowerCase().includes('connection');
+          
           setInvoiceEmailResult({ 
             success: false, 
-            message: `Failed to send: ${error.message || 'Unknown error'}` 
+            message: isNetworkError 
+              ? `Failed to send invoice email: Network error. Please check your internet connection and try again.`
+              : `Failed to send invoice email: ${error.message || 'Unknown error'}. Please try again or contact support if the issue persists.`,
+            canRetry: true
           });
         } else if (data?.success) {
+          console.log('[Invoice Email] Success:', {
+            loadId: load.id,
+            invoiceId: invoice?.id,
+            emailedTo: data.emailed_to,
+            emailedAt: data.emailed_at
+          });
+          
           setInvoiceEmailResult({ 
             success: true, 
             message: data.message || `Invoice sent to ${data.emailed_to}` 
@@ -686,9 +707,16 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
             setInvoice({ ...invoice, emailed_at: data.emailed_at, emailed_to: data.emailed_to });
           }
         } else {
+          console.error('[Invoice Email] Server returned non-success:', {
+            loadId: load.id,
+            invoiceId: invoice?.id,
+            data: data
+          });
+          
           setInvoiceEmailResult({ 
             success: false, 
-            message: data?.error || 'Failed to send invoice email' 
+            message: data?.error || data?.message || 'Invoice email failed to send. The server did not return a success response. Please try again.',
+            canRetry: true
           });
         }
       } finally {
@@ -696,15 +724,45 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
         abortControllerRef.current = null;
       }
     } catch (err: any) {
-      console.error('[Invoice Email] Exception:', err);
+      console.error('[Invoice Email] Exception:', {
+        loadId: load.id,
+        invoiceId: invoice?.id,
+        error: err,
+        message: err.message,
+        stack: err.stack
+      });
+      
+      // Differentiate between timeout, network, cancellation, and other errors
+      let errorMessage = 'Failed to send invoice email: ';
+      let canRetry = false;
+      
+      if (err.message?.includes('timed out') || err.message?.includes('timeout')) {
+        errorMessage += 'Request timed out after 30 seconds. This may indicate a network issue or server overload. Please check your internet connection and try again.';
+        canRetry = true;
+      } else if (err.message?.includes('network') || err.message?.includes('fetch') || err.message?.includes('Failed to fetch')) {
+        errorMessage += 'Network error. Please check your internet connection and try again.';
+        canRetry = true;
+      } else if (err.message?.includes('cancelled') || err.message?.includes('abort')) {
+        errorMessage += 'Request was cancelled.';
+        canRetry = true;
+      } else if (err.message?.includes('401') || err.message?.includes('unauthorized')) {
+        errorMessage += 'Authentication error. Please refresh the page and try again.';
+        canRetry = true;
+      } else if (err.message?.includes('403') || err.message?.includes('forbidden')) {
+        errorMessage += 'Permission denied. Please contact your administrator.';
+        canRetry = false;
+      } else if (err.message?.includes('500') || err.message?.includes('server error')) {
+        errorMessage += 'Server error occurred. Please try again later or contact support.';
+        canRetry = true;
+      } else {
+        errorMessage += err.message || 'An unexpected error occurred. Please try again or contact support if the issue persists.';
+        canRetry = true;
+      }
       
       setInvoiceEmailResult({ 
         success: false, 
-        message: err.message === 'Request timed out after 30 seconds' 
-          ? 'Email request timed out. Please check your Resend configuration in Settings and try again.' 
-          : err.message === 'Request cancelled'
-          ? 'Email send cancelled by user'
-          : `Error: ${err.message || 'Failed to send invoice'}` 
+        message: errorMessage,
+        canRetry: canRetry
       });
     } finally {
       setSendingInvoiceEmail(false);
@@ -1456,9 +1514,23 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
 
                     {/* Email result feedback */}
                     {invoiceEmailResult && (
-                      <div className={`flex items-center gap-2 mb-3 px-3 py-2 rounded-lg border ${invoiceEmailResult.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-                        {invoiceEmailResult.success ? <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" /> : <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />}
-                        <p className={`text-xs ${invoiceEmailResult.success ? 'text-green-700' : 'text-red-700'}`}>{invoiceEmailResult.message}</p>
+                      <div className={`mb-3 px-3 py-2 rounded-lg border ${invoiceEmailResult.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                        <div className="flex items-center gap-2">
+                          {invoiceEmailResult.success ? <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" /> : <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />}
+                          <p className={`text-xs flex-1 ${invoiceEmailResult.success ? 'text-green-700' : 'text-red-700'}`}>{invoiceEmailResult.message}</p>
+                          {!invoiceEmailResult.success && invoiceEmailResult.canRetry && (
+                            <button
+                              onClick={() => {
+                                setInvoiceEmailResult(null);
+                                handleSendInvoiceEmail();
+                              }}
+                              disabled={sendingInvoiceEmail}
+                              className="px-2 py-1 text-xs font-medium text-red-700 bg-red-100 rounded hover:bg-red-200 transition-colors disabled:opacity-50"
+                            >
+                              Retry
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
 
