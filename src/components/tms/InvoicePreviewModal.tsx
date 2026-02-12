@@ -528,19 +528,19 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                       {/* Bill To with Modern Card */}
                       <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 border-2 border-amber-200 shadow-lg">
                         <div className="flex items-center gap-2 mb-2">
-                          <div className="w-8 h-8 bg-amber-500 rounded-lg flex items-center justify-center">
-                            <span className="text-white font-bold text-sm">
+                          <div className="w-9 h-9 bg-amber-500 rounded-lg flex items-center justify-center">
+                            <span className="text-white font-bold text-base">
                               {customer?.company_name?.charAt(0) || load.dest_company?.charAt(0) || '?'}
                             </span>
                           </div>
                           <div>
                             <p className="text-xs text-amber-600 uppercase tracking-wider font-semibold">Bill To</p>
-                            <h3 className="text-sm font-bold text-slate-900">
+                            <h3 className="text-base font-bold text-slate-900">
                               {customer?.company_name || load.dest_company}
                             </h3>
                           </div>
                         </div>
-                        <div className="space-y-1 text-xs text-slate-700">
+                        <div className="space-y-1 text-sm text-slate-700">
                           {customer ? (
                             <>
                               <p>{customer.billing_address}</p>
