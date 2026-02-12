@@ -352,7 +352,21 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
             .pod-section { margin-top: 24px; page-break-before: always; }
             .pod-image { max-width: 100%; margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 4px; page-break-before: always; page-break-inside: avoid; }
             .broken-pod { display: none; }
-            @media print { body { padding: 20px; } .no-print { display: none; } .broken-pod { display: none; } }
+            @media print { 
+              body { 
+                padding: 20px; 
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              } 
+              .no-print { display: none; } 
+              .broken-pod { display: none; }
+              /* Preserve gradients and colors in print */
+              .bg-gradient-to-r,
+              .bg-gradient-to-br {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+            }
           </style>
         </head>
         <body>
@@ -504,68 +518,121 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
           ) : (
             <div ref={printRef} className="bg-white rounded-lg shadow-lg max-w-[700px] mx-auto">
               <div className="p-8 sm:p-10">
-                {/* Company Header */}
-                <div className="text-center mb-6">
-                  <h1 className="text-2xl font-bold text-blue-600 mb-1">
-                    {companySettings.company_name}
-                  </h1>
-                  <p className="text-sm text-slate-500 leading-relaxed">
-                    {companySettings.company_address}<br />
-                    {companySettings.company_city}, {companySettings.company_state} {companySettings.company_zip}<br />
-                    Phone: {companySettings.company_phone}<br />
-                    Email: {companySettings.company_email}
-                  </p>
+                {/* Modern Invoice Header with Gradient */}
+                <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 p-8 rounded-t-2xl text-white mb-6 -m-8 sm:-m-10 mb-6">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h1 className="text-4xl font-bold mb-2">INVOICE</h1>
+                      <div className="flex items-center gap-2 text-blue-100">
+                        <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                        <span className="text-sm font-medium">Payment Due Upon Receipt</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="bg-white/20 backdrop-blur-sm rounded-lg px-4 py-2 mb-2">
+                        <p className="text-xs text-blue-100 mb-1">Invoice Number</p>
+                        <p className="text-2xl font-bold">#{invoice.invoice_number}</p>
+                      </div>
+                      <p className="text-sm text-blue-200">
+                        {new Date(invoice.created_at).toLocaleDateString('en-US', { 
+                          month: 'long', 
+                          day: 'numeric', 
+                          year: 'numeric' 
+                        })}
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Divider */}
-                <div className="border-t border-slate-200 mb-6"></div>
-
-                {/* Invoice Meta */}
-                <div className="flex justify-between mb-8">
-                  <div>
-                    <h2 className="text-xl font-bold text-slate-800 mb-1">
-                      Invoice {invoice.invoice_number}
-                    </h2>
-                    <p className="text-sm text-slate-600">
-                      <span className="font-semibold">Date:</span>{' '}
-                      {new Date(invoice.created_at).toLocaleDateString('en-US', {
-                        month: 'numeric',
-                        day: 'numeric',
-                        year: 'numeric',
-                      })}
-                    </p>
-                    {customer && (
-                      <p className="text-sm text-slate-600 mt-1">
-                        <span className="font-semibold">Bill To:</span>{' '}
-                        {customer.company_name}
-                      </p>
-                    )}
+                {/* Company Info with Visual Card */}
+                <div className="grid grid-cols-2 gap-6 mb-6">
+                  <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-5 border-2 border-slate-200">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+                        <span className="text-white font-bold text-lg">
+                          {companySettings.company_name.charAt(0)}
+                        </span>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold">From</p>
+                        <h3 className="text-lg font-bold text-slate-900">{companySettings.company_name}</h3>
+                      </div>
+                    </div>
+                    <div className="space-y-1 text-sm text-slate-600">
+                      <p>{companySettings.company_address}</p>
+                      <p>{companySettings.company_city}, {companySettings.company_state} {companySettings.company_zip}</p>
+                      <p className="font-medium text-blue-600">{companySettings.company_phone}</p>
+                      <p className="font-medium text-blue-600">{companySettings.company_email}</p>
+                    </div>
                   </div>
-                  <div className="text-right text-sm space-y-1">
-                    <p>
-                      <span className="font-semibold text-slate-800">Load #:</span>{' '}
-                      <span className="text-slate-600">{load.load_number}</span>
-                    </p>
-                    <p>
-                      <span className="font-semibold text-slate-800">BOL/POD #:</span>{' '}
-                      <span className="text-slate-600">{load.bol_number || 'N/A'}</span>
-                    </p>
-                    {load.trip_number && (
-                      <p>
-                        <span className="font-semibold text-slate-800">Trip #:</span>{' '}
-                        <span className="text-slate-600">{load.trip_number}</span>
-                      </p>
-                    )}
-                    <p>
-                      <span className="font-semibold text-slate-800">Driver:</span>{' '}
-                      <span className="text-slate-600">{load.driver?.name || 'N/A'}</span>
-                    </p>
-                    {miles > 0 && (
-                      <p>
-                        <span className="font-semibold text-slate-800">Miles:</span>{' '}
-                        <span className="text-slate-600">{miles.toLocaleString()}</span>
-                      </p>
-                    )}
+
+                  {/* Bill To with Modern Card */}
+                  <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-5 border-2 border-amber-200">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-10 h-10 bg-amber-500 rounded-lg flex items-center justify-center">
+                        <span className="text-white font-bold text-lg">
+                          {customer?.company_name?.charAt(0) || load.dest_company?.charAt(0) || '?'}
+                        </span>
+                      </div>
+                      <div>
+                        <p className="text-xs text-amber-600 uppercase tracking-wider font-semibold">Bill To</p>
+                        <h3 className="text-lg font-bold text-slate-900">
+                          {customer?.company_name || load.dest_company}
+                        </h3>
+                      </div>
+                    </div>
+                    <div className="space-y-1 text-sm text-slate-700">
+                      {customer ? (
+                        <>
+                          <p>{customer.billing_address}</p>
+                          <p>{customer.billing_city}, {customer.billing_state} {customer.billing_zip}</p>
+                          <p className="font-medium text-amber-700">{customer.email}</p>
+                          <p className="font-medium text-amber-700">{customer.phone}</p>
+                        </>
+                      ) : (
+                        <p className="text-slate-500 italic">Customer details not available</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Load Info Section */}
+                <div className="bg-slate-50 rounded-lg p-4 mb-6 border border-slate-200">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold mb-1">Load Details</p>
+                      <div className="space-y-1">
+                        <p>
+                          <span className="font-semibold text-slate-800">Load #:</span>{' '}
+                          <span className="text-slate-600">{load.load_number}</span>
+                        </p>
+                        <p>
+                          <span className="font-semibold text-slate-800">BOL/POD #:</span>{' '}
+                          <span className="text-slate-600">{load.bol_number || 'N/A'}</span>
+                        </p>
+                        {load.trip_number && (
+                          <p>
+                            <span className="font-semibold text-slate-800">Trip #:</span>{' '}
+                            <span className="text-slate-600">{load.trip_number}</span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold mb-1">Transport Info</p>
+                      <div className="space-y-1">
+                        <p>
+                          <span className="font-semibold text-slate-800">Driver:</span>{' '}
+                          <span className="text-slate-600">{load.driver?.name || 'N/A'}</span>
+                        </p>
+                        {miles > 0 && (
+                          <p>
+                            <span className="font-semibold text-slate-800">Miles:</span>{' '}
+                            <span className="text-slate-600">{miles.toLocaleString()}</span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -630,14 +697,6 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                             ${fmt(fuelSurchargeAmount)}
                           </td>
                         </tr>
-                        <tr className="subtotal-row">
-                          <td className="px-3 py-3 text-sm font-bold text-slate-800 border border-slate-200 border-t-2">
-                            Total
-                          </td>
-                          <td className="px-3 py-3 text-sm font-bold text-blue-600 border border-slate-200 border-t-2 text-right">
-                            ${fmt(invoice.amount)}
-                          </td>
-                        </tr>
                       </>
                     ) : (
                       <tr>
@@ -651,6 +710,92 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                     )}
                   </tbody>
                 </table>
+
+                {/* Amount Due - BIG and BOLD */}
+                <div className="bg-gradient-to-r from-emerald-500 via-green-500 to-teal-500 rounded-2xl p-8 mb-6 shadow-lg">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-emerald-100 text-sm font-semibold uppercase tracking-wider mb-1">
+                        Total Amount Due
+                      </p>
+                      <p className="text-5xl font-black text-white drop-shadow-lg">
+                        ${fmt(invoice.amount)}
+                      </p>
+                      <div className="flex items-center gap-2 mt-3">
+                        <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                        <p className="text-emerald-50 text-sm font-medium">
+                          Payment Due Immediately
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="bg-white/20 backdrop-blur-sm rounded-lg px-4 py-3">
+                        <p className="text-xs text-emerald-100 mb-1">Load Number</p>
+                        <p className="text-2xl font-bold text-white">#{load.load_number}</p>
+                      </div>
+                      {load.bol_number && (
+                        <div className="bg-white/20 backdrop-blur-sm rounded-lg px-4 py-2 mt-2">
+                          <p className="text-xs text-emerald-100 mb-1">BOL Number</p>
+                          <p className="text-lg font-bold text-white">{load.bol_number}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Route Info with Icons and Visual Flow */}
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 mb-6 border-2 border-blue-200">
+                  <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wider mb-4 flex items-center gap-2">
+                    <MapPin className="w-4 h-4" />
+                    Delivery Route
+                  </h3>
+                  <div className="relative">
+                    {/* Pickup */}
+                    <div className="flex items-start gap-4 mb-4">
+                      <div className="flex flex-col items-center">
+                        <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center shadow-md">
+                          <span className="text-white font-bold text-sm">P</span>
+                        </div>
+                        <div className="w-0.5 h-12 bg-blue-300"></div>
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-xs text-green-700 font-semibold uppercase mb-1">Pickup</p>
+                        <p className="font-bold text-slate-900">{pickupStops[0]?.company_name || load.origin_company}</p>
+                        <p className="text-sm text-slate-600">
+                          {pickupStops[0]?.city || load.origin_city}, {pickupStops[0]?.state || load.origin_state}
+                        </p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          {new Date(load.pickup_date).toLocaleDateString('en-US', { 
+                            month: 'short', 
+                            day: 'numeric', 
+                            year: 'numeric' 
+                          })}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Delivery */}
+                    <div className="flex items-start gap-4">
+                      <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center shadow-md">
+                        <span className="text-white font-bold text-sm">D</span>
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-xs text-red-700 font-semibold uppercase mb-1">Delivery</p>
+                        <p className="font-bold text-slate-900">{deliveryStops[0]?.company_name || load.dest_company}</p>
+                        <p className="text-sm text-slate-600">
+                          {deliveryStops[0]?.city || load.dest_city}, {deliveryStops[0]?.state || load.dest_state}
+                        </p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          {new Date(load.delivery_date).toLocaleDateString('en-US', { 
+                            month: 'short', 
+                            day: 'numeric', 
+                            year: 'numeric' 
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
                 {/* GPS-Verified Arrival & Departure Times */}
                 <div className="border-2 border-blue-200 rounded-lg p-4 mb-6">
@@ -844,13 +989,6 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                       </div>
                     </div>
                   )}
-                </div>
-
-                {/* Total */}
-                <div className="text-right mb-8">
-                  <span className="text-xl font-bold text-blue-600">
-                    Total: ${fmt(invoice.amount)}
-                  </span>
                 </div>
 
                 {/* POD Documents */}
