@@ -50,6 +50,7 @@ const LoginPage: React.FC = () => {
     setResetEmail('');
     setResetSuccess(false);
     setResetError('');
+    setError('');
   };
 
   return (
@@ -256,7 +257,12 @@ const LoginPage: React.FC = () => {
                   <div className="mt-2 text-right">
                     <button
                       type="button"
-                      onClick={() => setShowResetPassword(true)}
+                      onClick={() => {
+                        setShowResetPassword(true);
+                        setError('');
+                        setEmail('');
+                        setPassword('');
+                      }}
                       className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
                     >
                       Forgot Password?
@@ -304,7 +310,6 @@ const LoginPage: React.FC = () => {
                 >
                   New here? See what LoadTracker PRO can do for your fleet &rarr;
                 </a>
-
               </div>
             </div>
           )}
