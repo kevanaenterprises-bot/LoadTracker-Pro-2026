@@ -595,10 +595,55 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
   // Send invoice to customer email
   const handleSendInvoiceEmail = async () => {
     if (!load) return;
-    setSendingInvoiceEmail(true);
+    
+    // Check if customer is assigned to this load
+    if (!load.customer_id) {
+      setInvoiceEmailResult({ 
+        success: false, 
+        message: 'Cannot send invoice: No customer assigned to this load.' 
+      });
+      return;
+    }
+
+    // Set initial loading state for customer fetch
     setInvoiceEmailResult(null);
 
     try {
+      // Fetch customer data to verify email exists
+      const { data: customer, error: customerError } = await supabase
+        .from('customers')
+        .select('email, company_name')
+        .eq('id', load.customer_id)
+        .single();
+
+      if (customerError || !customer) {
+        setInvoiceEmailResult({ 
+          success: false, 
+          message: 'Cannot send invoice: Customer not found.' 
+        });
+        return;
+      }
+
+      if (!customer.email || customer.email.trim() === '') {
+        setInvoiceEmailResult({ 
+          success: false, 
+          message: `Cannot send invoice: Customer "${customer.company_name}" has no email address. Please add an email to the customer profile first.` 
+        });
+        return;
+      }
+
+      // Basic email format validation
+      if (!customer.email.includes('@')) {
+        setInvoiceEmailResult({ 
+          success: false, 
+          message: `Cannot send invoice: Customer "${customer.company_name}" has an invalid email address. Please update the customer profile.` 
+        });
+        return;
+      }
+
+      // All validations passed, now set loading state and call the edge function
+      setSendingInvoiceEmail(true);
+
       const { data, error } = await supabase.functions.invoke('send-invoice-email', {
         body: { load_id: load.id },
       });
