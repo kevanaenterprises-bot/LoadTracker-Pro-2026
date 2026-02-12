@@ -15,6 +15,7 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
+  resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
   isAdmin: boolean;
   isDriver: boolean;
 }
@@ -96,11 +97,29 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setUser(null);
   };
 
+  const resetPassword = async (email: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      
+      if (error) {
+        return { success: false, error: error.message };
+      }
+      
+      return { success: true };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to send reset email';
+      return { success: false, error: errorMessage };
+    }
+  };
+
   const value: AuthContextType = {
     user,
     loading,
     login,
     logout,
+    resetPassword,
     isAdmin: user?.role === 'admin',
     isDriver: user?.role === 'driver',
   };

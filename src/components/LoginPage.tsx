@@ -1,14 +1,18 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Truck, Mail, Lock, Loader2, AlertCircle, User, Shield } from 'lucide-react';
+import { Truck, Mail, Lock, Loader2, AlertCircle, User, Shield, ArrowLeft, CheckCircle } from 'lucide-react';
 
 const LoginPage: React.FC = () => {
-  const { login } = useAuth();
+  const { login, resetPassword } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [loginType, setLoginType] = useState<'admin' | 'driver'>('admin');
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetSuccess, setResetSuccess] = useState(false);
+  const [resetError, setResetError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,6 +26,30 @@ const LoginPage: React.FC = () => {
     }
     
     setLoading(false);
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setResetError('');
+    setResetSuccess(false);
+    setLoading(true);
+
+    const result = await resetPassword(resetEmail);
+    
+    if (result.success) {
+      setResetSuccess(true);
+    } else {
+      setResetError(result.error || 'Failed to send reset email');
+    }
+    
+    setLoading(false);
+  };
+
+  const handleBackToLogin = () => {
+    setShowResetPassword(false);
+    setResetEmail('');
+    setResetSuccess(false);
+    setResetError('');
   };
 
   return (
@@ -104,92 +132,182 @@ const LoginPage: React.FC = () => {
 
         {/* Login Form */}
         <div className="bg-white/10 backdrop-blur-md rounded-2xl shadow-2xl border border-white/10 p-8">
-          <h2 className="text-xl font-semibold text-white mb-6">
-            {loginType === 'admin' ? 'Administrator Access' : 'Driver Portal Access'}
-          </h2>
+          {showResetPassword ? (
+            // Password Reset Form
+            <>
+              <div className="mb-6">
+                <button
+                  onClick={handleBackToLogin}
+                  className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  Back to Login
+                </button>
+              </div>
 
-          {error && (
-            <div className="mb-6 p-4 bg-red-500/20 border border-red-500/30 rounded-xl flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
-              <p className="text-red-200 text-sm">{error}</p>
-            </div>
+              <h2 className="text-xl font-semibold text-white mb-2">
+                Reset Your Password
+              </h2>
+              <p className="text-slate-400 text-sm mb-6">
+                Enter your email address and we'll send you a link to reset your password.
+              </p>
+
+              {resetSuccess && (
+                <div className="mb-6 p-4 bg-emerald-500/20 border border-emerald-500/30 rounded-xl flex items-center gap-3">
+                  <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                  <p className="text-emerald-200 text-sm">Password reset email sent! Check your inbox.</p>
+                </div>
+              )}
+
+              {resetError && (
+                <div className="mb-6 p-4 bg-red-500/20 border border-red-500/30 rounded-xl flex items-center gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
+                  <p className="text-red-200 text-sm">{resetError}</p>
+                </div>
+              )}
+
+              <form onSubmit={handleResetPassword} className="space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Email Address
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                    <input
+                      type="email"
+                      value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      placeholder="you@company.com"
+                      className="w-full pl-12 pr-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      required
+                      disabled={resetSuccess}
+                    />
+                  </div>
+                </div>
+
+                {!resetSuccess && (
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full py-4 rounded-xl font-semibold text-white transition-all flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      <>
+                        <Mail className="w-5 h-5" />
+                        Send Reset Link
+                      </>
+                    )}
+                  </button>
+                )}
+              </form>
+            </>
+          ) : (
+            // Login Form
+            <>
+              <h2 className="text-xl font-semibold text-white mb-6">
+                {loginType === 'admin' ? 'Administrator Access' : 'Driver Portal Access'}
+              </h2>
+
+              {error && (
+                <div className="mb-6 p-4 bg-red-500/20 border border-red-500/30 rounded-xl flex items-center gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
+                  <p className="text-red-200 text-sm">{error}</p>
+                </div>
+              )}
+
+              <form onSubmit={handleSubmit} className="space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Email Address
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder={loginType === 'admin' ? 'you@company.com' : 'driver@company.com'}
+                      className="w-full pl-12 pr-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter your password"
+                      className="w-full pl-12 pr-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      required
+                    />
+                  </div>
+                  <div className="mt-2 text-right">
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPassword(true)}
+                      className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+                    >
+                      Forgot Password?
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className={`w-full py-4 rounded-xl font-semibold text-white transition-all flex items-center justify-center gap-2 ${
+                    loginType === 'admin'
+                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-500/30'
+                      : 'bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 shadow-lg shadow-emerald-500/30'
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Signing in...
+                    </>
+                  ) : (
+                    <>
+                      {loginType === 'admin' ? <Shield className="w-5 h-5" /> : <User className="w-5 h-5" />}
+                      Sign In
+                    </>
+                  )}
+                </button>
+              </form>
+            </>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
-                Email Address
-              </label>
-              <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder={loginType === 'admin' ? 'you@company.com' : 'driver@company.com'}
-                  className="w-full pl-12 pr-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  required
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
-                Password
-              </label>
-              <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your password"
-                  className="w-full pl-12 pr-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                  required
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className={`w-full py-4 rounded-xl font-semibold text-white transition-all flex items-center justify-center gap-2 ${
-                loginType === 'admin'
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-500/30'
-                  : 'bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 shadow-lg shadow-emerald-500/30'
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Signing in...
-                </>
-              ) : (
-                <>
-                  {loginType === 'admin' ? <Shield className="w-5 h-5" /> : <User className="w-5 h-5" />}
-                  Sign In
-                </>
-              )}
-            </button>
-          </form>
-
           {/* Help text */}
-          <div className="mt-6 pt-6 border-t border-slate-700/50">
-            <p className="text-xs text-slate-500 text-center">
-              {loginType === 'admin' 
-                ? 'Contact your administrator if you need access credentials.' 
-                : 'Your login credentials are provided by your dispatcher.'}
-            </p>
-            <div className="mt-4 text-center">
-              <a
-                href="/demo"
-                className="text-sm text-blue-400 hover:text-blue-300 transition-colors font-medium"
-              >
-                New here? See what LoadTracker PRO can do for your fleet &rarr;
-              </a>
+          {!showResetPassword && (
+            <div className="mt-6 pt-6 border-t border-slate-700/50">
+              <p className="text-xs text-slate-500 text-center">
+                {loginType === 'admin' 
+                  ? 'Contact your administrator if you need access credentials.' 
+                  : 'Your login credentials are provided by your dispatcher.'}
+              </p>
+              <div className="mt-4 text-center">
+                <a
+                  href="/demo"
+                  className="text-sm text-blue-400 hover:text-blue-300 transition-colors font-medium"
+                >
+                  New here? See what LoadTracker PRO can do for your fleet &rarr;
+                </a>
 
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
 
