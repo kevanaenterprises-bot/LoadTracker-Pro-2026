@@ -302,7 +302,7 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
 
   const isAnyTimestampVerified = timestamps.some(t => t.verified);
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (!load || !invoice) return;
 
     // Format invoice date
@@ -324,6 +324,54 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
     const pickupDeparted = formatTimestamp(getTimestamp('pickup', 'departed'));
     const deliveryArrived = formatTimestamp(getTimestamp('delivery', 'arrived'));
     const deliveryDeparted = formatTimestamp(getTimestamp('delivery', 'departed'));
+
+    // Get pickup and delivery location info for route section
+    const pickupLocation = pickupStops.length > 0
+      ? {
+          name: pickupStops[0].company_name || load.origin_company,
+          city: pickupStops[0].city || load.origin_city,
+          state: pickupStops[0].state || load.origin_state,
+        }
+      : {
+          name: load.origin_company,
+          city: load.origin_city,
+          state: load.origin_state,
+        };
+
+    const deliveryLocation = deliveryStops.length > 0
+      ? {
+          name: deliveryStops[0].company_name || load.dest_company,
+          city: deliveryStops[0].city || load.dest_city,
+          state: deliveryStops[0].state || load.dest_state,
+        }
+      : {
+          name: load.dest_company,
+          city: load.dest_city,
+          state: load.dest_state,
+        };
+
+    const pickupDate = new Date(load.pickup_date).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+
+    const deliveryDate = new Date(load.delivery_date).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+
+    // Build POD images HTML
+    const podImagesHtml = documents
+      .filter(doc => doc.file_type?.startsWith('image/') && !brokenPodIds.has(doc.id))
+      .map(doc => `
+        <div class="pod-image-wrapper">
+          <img src="${doc.file_url}" alt="${doc.file_name}" class="pod-image" />
+          <p class="pod-caption">${doc.file_name}</p>
+        </div>
+      `)
+      .join('');
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
@@ -502,9 +550,238 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
               font-family: 'Monaco', 'Courier New', monospace;
             }
 
+            /* Amount Due Section */
+            .amount-due {
+              background: linear-gradient(to right, #10b981, #059669, #14b8a6);
+              border-radius: 12px;
+              padding: 32px;
+              margin-bottom: 32px !important;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            }
+            .amount-due-left h4 {
+              font-size: 14px;
+              color: #d1fae5;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              font-weight: 600;
+              margin-bottom: 8px;
+            }
+            .amount-due-left .amount {
+              font-size: 48px;
+              font-weight: 900;
+              color: white;
+            }
+            .amount-due-right {
+              text-align: right;
+            }
+            .load-badge {
+              background: rgba(255,255,255,0.2);
+              border-radius: 8px;
+              padding: 12px 16px;
+              margin-bottom: 8px;
+            }
+            .load-badge p:first-child {
+              font-size: 11px;
+              color: #d1fae5;
+              margin-bottom: 4px;
+            }
+            .load-badge p:last-child {
+              font-size: 20px;
+              font-weight: 700;
+              color: white;
+            }
+            .bol-badge {
+              background: rgba(255,255,255,0.2);
+              border-radius: 8px;
+              padding: 8px 12px;
+            }
+            .bol-badge p:first-child {
+              font-size: 11px;
+              color: #d1fae5;
+              margin-bottom: 4px;
+            }
+            .bol-badge p:last-child {
+              font-size: 16px;
+              font-weight: 700;
+              color: white;
+            }
+
+            /* Route Info Section */
+            .route-info {
+              background: linear-gradient(to right, #eff6ff, #e0e7ff);
+              border: 2px solid #bfdbfe;
+              border-radius: 12px;
+              padding: 24px;
+              margin-bottom: 24px !important;
+            }
+            .route-title {
+              font-size: 14px;
+              font-weight: 700;
+              color: #1e3a8a;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              margin-bottom: 16px;
+            }
+            .route-flow {
+              display: flex;
+              align-items: center;
+              gap: 16px;
+            }
+            .route-location {
+              flex: 1;
+            }
+            .route-icon {
+              width: 40px;
+              height: 40px;
+              border-radius: 50%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-weight: 700;
+              color: white;
+              font-size: 16px;
+            }
+            .pickup-icon {
+              background: #10b981;
+            }
+            .delivery-icon {
+              background: #ef4444;
+            }
+            .route-arrow {
+              width: 60px;
+              height: 2px;
+              background: #3b82f6;
+              position: relative;
+            }
+            .route-arrow::after {
+              content: '▶';
+              position: absolute;
+              right: -8px;
+              top: -8px;
+              color: #3b82f6;
+              font-size: 16px;
+            }
+            .route-label {
+              font-size: 11px;
+              color: #059669;
+              font-weight: 600;
+              text-transform: uppercase;
+              margin-bottom: 4px;
+            }
+            .delivery-label {
+              color: #dc2626;
+            }
+            .route-company {
+              font-weight: 700;
+              color: #1e293b;
+              font-size: 15px;
+              margin-bottom: 2px;
+            }
+            .route-location-text {
+              font-size: 13px;
+              color: #64748b;
+              margin-bottom: 2px;
+            }
+            .route-date {
+              font-size: 11px;
+              color: #94a3b8;
+            }
+
+            /* POD Section */
+            .pod-section {
+              margin-top: 32px;
+            }
+            .pod-title {
+              font-size: 14px;
+              font-weight: 700;
+              color: #64748b;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              margin-bottom: 16px;
+              padding-top: 16px;
+              border-top: 2px solid #e2e8f0;
+            }
+            .pod-image-wrapper {
+              margin-bottom: 16px;
+            }
+            .pod-image {
+              max-width: 100%;
+              height: auto;
+              display: block;
+              border: 1px solid #e2e8f0;
+              border-radius: 4px;
+              margin-bottom: 8px;
+            }
+            .pod-caption {
+              font-size: 12px;
+              color: #64748b;
+              text-align: center;
+            }
+
             @media print {
-              body { padding: 0; }
-              .invoice-container { max-width: 100%; }
+              body { 
+                padding: 20px; 
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              
+              /* Prevent page breaks in critical sections */
+              .invoice-header,
+              .company-info,
+              .load-info,
+              .line-items,
+              .amount-due {
+                page-break-inside: avoid !important;
+              }
+              
+              /* Force route and GPS section to stay together */
+              .route-info,
+              .gps-section {
+                page-break-inside: avoid !important;
+                page-break-before: auto !important;
+              }
+              
+              /* POD section should start on new page */
+              .pod-section { 
+                page-break-before: always !important;
+                page-break-inside: avoid !important;
+              }
+              
+              /* Each POD image on its own page (except first) */
+              .pod-image-wrapper:not(:first-child) { 
+                page-break-before: always !important;
+                page-break-after: auto !important;
+                page-break-inside: avoid !important;
+              }
+              
+              .pod-image-wrapper:first-child {
+                page-break-inside: avoid !important;
+              }
+              
+              .no-print { display: none !important; }
+              .broken-pod { display: none !important; }
+              
+              /* Ensure gradients print correctly */
+              .amount-due,
+              .bg-gradient-to-r,
+              .bg-gradient-to-br {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              
+              /* Prevent orphaned content */
+              * {
+                orphans: 3;
+                widows: 3;
+              }
+
+              .invoice-container { 
+                max-width: 800px; 
+                margin: 0 auto;
+                overflow: visible !important;
+              }
             }
           </style>
         </head>
@@ -575,6 +852,46 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
               </tbody>
             </table>
 
+            <!-- Amount Due - BIG and BOLD -->
+            <div class="amount-due">
+              <div class="amount-due-left">
+                <h4>Total Amount Due</h4>
+                <div class="amount">$${invoiceAmount}</div>
+              </div>
+              <div class="amount-due-right">
+                <div class="load-badge">
+                  <p>Load Number</p>
+                  <p>#${load.load_number || 'N/A'}</p>
+                </div>
+                ${load.bol_number ? `
+                  <div class="bol-badge">
+                    <p>BOL Number</p>
+                    <p>${load.bol_number}</p>
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+
+            <!-- Route Info with Visual Flow -->
+            <div class="route-info">
+              <div class="route-title">📍 Delivery Route</div>
+              <div class="route-flow">
+                <div class="route-location">
+                  <div class="route-label">Pickup</div>
+                  <div class="route-company">${pickupLocation.name || 'N/A'}</div>
+                  <div class="route-location-text">${pickupLocation.city || ''}, ${pickupLocation.state || ''}</div>
+                  <div class="route-date">${pickupDate}</div>
+                </div>
+                <div class="route-arrow"></div>
+                <div class="route-location">
+                  <div class="route-label delivery-label">Delivery</div>
+                  <div class="route-company">${deliveryLocation.name || 'N/A'}</div>
+                  <div class="route-location-text">${deliveryLocation.city || ''}, ${deliveryLocation.state || ''}</div>
+                  <div class="route-date">${deliveryDate}</div>
+                </div>
+              </div>
+            </div>
+
             <!-- GPS section (only if timestamps exist) -->
             ${timestamps.length > 0 ? `
               <div class="gps-section">
@@ -617,15 +934,41 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                 </div>
               </div>
             ` : ''}
+
+            <!-- POD Documents -->
+            ${podImagesHtml ? `
+              <div class="pod-section">
+                <div class="pod-title">Attached POD Documents</div>
+                ${podImagesHtml}
+              </div>
+            ` : ''}
           </div>
         </body>
       </html>
     `);
     printWindow.document.close();
+    
+     // Wait for all images to load before printing
+    const images = printWindow.document.querySelectorAll('img');
+    const imagePromises = Array.from(images).map(img => {
+      return new Promise<void>((resolve) => {
+        if (img.complete) {
+          resolve();
+        } else {
+          img.onload = () => resolve();
+          img.onerror = () => resolve(); // Still resolve on error to not block
+        }
+      });
+    });
+
+    await Promise.all(imagePromises);
+    
     printWindow.focus();
+    
+    const PRINT_RENDER_DELAY_MS = 1000;
     setTimeout(() => {
       printWindow.print();
-    }, 500);
+    }, PRINT_RENDER_DELAY_MS);
   };
 
   if (!isOpen || !load || !invoice) return null;
