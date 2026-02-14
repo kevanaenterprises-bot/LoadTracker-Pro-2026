@@ -277,27 +277,12 @@ const AppLayout: React.FC = () => {
     }
     
     try {
-      const supabaseUrl = 'https://tlksfrowyjprvjerydrp.databasepad.com';
-      const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImZlMDM0ZDk3LWI2ZjctNGMzYy1hNjk5LWNlZDVlMDY1NjQxMCJ9.eyJwcm9qZWN0SWQiOiJ0bGtzZnJvd3lqcHJ2amVyeWRycCIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzcwMjQxMjY3LCJleHAiOjIwODU2MDEyNjcsImlzcyI6ImZhbW91cy5kYXRhYmFzZXBhZCIsImF1ZCI6ImZhbW91cy5jbGllbnRzIn0.yONwNzlthOzRbUbS6YaOJpx3YAO94QiSLCaue3NqjXo';
-      
-      const headers = {
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
-      };
-
-      // Delete payments first (new)
-      await fetch(`${supabaseUrl}/rest/v1/payments?load_id=eq.${load.id}`, { method: 'DELETE', headers });
-      await fetch(`${supabaseUrl}/rest/v1/load_stops?load_id=eq.${load.id}`, { method: 'DELETE', headers });
-      await fetch(`${supabaseUrl}/rest/v1/pod_documents?load_id=eq.${load.id}`, { method: 'DELETE', headers });
-      await fetch(`${supabaseUrl}/rest/v1/invoices?load_id=eq.${load.id}`, { method: 'DELETE', headers });
-
-      const loadResponse = await fetch(`${supabaseUrl}/rest/v1/loads?id=eq.${load.id}`, { method: 'DELETE', headers });
-
-      if (!loadResponse.ok) {
-        const errorText = await loadResponse.text();
-        alert(`Failed to delete load: ${errorText}`);
-        return;
-      }
+      // Delete associated records in correct order (PostgreSQL will handle cascades based on schema)
+      await db.from('payments').delete().eq('load_id', load.id);
+      await db.from('load_stops').delete().eq('load_id', load.id);
+      await db.from('pod_documents').delete().eq('load_id', load.id);
+      await db.from('invoices').delete().eq('load_id', load.id);
+      await db.from('loads').delete().eq('id', load.id);
 
       if (load.driver_id) {
         await db.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);

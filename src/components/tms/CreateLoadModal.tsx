@@ -383,25 +383,14 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
     return loadData;
   };
 
-  /** Delete a load and all its related records using direct REST API calls */
+  /** Delete a load and all its related records */
   const deleteLoadDirect = async (loadId: string, driverId?: string | null) => {
-    const headers = {
-      'apikey': supabaseKey,
-      'Authorization': `Bearer ${supabaseKey}`,
-    };
-
-    // Delete related records first (same pattern as handleDeleteLoad in AppLayout)
-    await fetch(`${supabaseUrl}/rest/v1/payments?load_id=eq.${loadId}`, { method: 'DELETE', headers });
-    await fetch(`${supabaseUrl}/rest/v1/load_stops?load_id=eq.${loadId}`, { method: 'DELETE', headers });
-    await fetch(`${supabaseUrl}/rest/v1/pod_documents?load_id=eq.${loadId}`, { method: 'DELETE', headers });
-    await fetch(`${supabaseUrl}/rest/v1/invoices?load_id=eq.${loadId}`, { method: 'DELETE', headers });
-
-    const loadResponse = await fetch(`${supabaseUrl}/rest/v1/loads?id=eq.${loadId}`, { method: 'DELETE', headers });
-
-    if (!loadResponse.ok) {
-      const errorText = await loadResponse.text();
-      throw new Error(`Failed to delete existing load: ${errorText}`);
-    }
+    // Delete related records first (foreign key constraints require this order)
+    await db.from('payments').delete().eq('load_id', loadId);
+    await db.from('load_stops').delete().eq('load_id', loadId);
+    await db.from('pod_documents').delete().eq('load_id', loadId);
+    await db.from('invoices').delete().eq('load_id', loadId);
+    await db.from('loads').delete().eq('id', loadId);
 
     // Release the driver if one was assigned
     if (driverId) {

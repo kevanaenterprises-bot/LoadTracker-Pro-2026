@@ -207,19 +207,8 @@ const DriverProfileModal: React.FC<DriverProfileModalProps> = ({ isOpen, driver,
   const handleDeleteFile = async (file: DriverFile) => {
     if (!confirm(`Delete "${file.file_name}"?`)) return;
 
-    // Extract path from URL for storage deletion
-    const pathMatch = file.file_url.match(/driver-files\/(.+)$/);
-    if (pathMatch) {
-      await db.storage.from('driver-files').remove([pathMatch[1]]);
-    }
-
-    await fetch(`${supabaseUrl}/rest/v1/driver_files?id=eq.${file.id}`, {
-      method: 'DELETE',
-      headers: {
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
-      },
-    });
+    // Delete file record from database
+    await db.from('driver_files').delete().eq('id', file.id);
 
     if (driver) fetchFiles(driver.id);
   };
