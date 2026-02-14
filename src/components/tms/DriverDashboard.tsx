@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { generateNextInvoiceNumber } from '@/lib/invoiceUtils';
 
 import { useAuth } from '@/contexts/AuthContext';
@@ -43,7 +43,7 @@ const DriverDashboard: React.FC = () => {
     if (!user?.driver_id) return;
     
     try {
-      const { data: driverData } = await supabase
+      const { data: driverData } = await db
         .from('drivers')
         .select('*')
         .eq('id', user.driver_id)
@@ -51,7 +51,7 @@ const DriverDashboard: React.FC = () => {
 
       if (driverData) setDriver(driverData);
 
-      const { data: loadsData } = await supabase
+      const { data: loadsData } = await db
         .from('loads')
         .select('*')
         .eq('driver_id', user.driver_id)
@@ -59,7 +59,7 @@ const DriverDashboard: React.FC = () => {
 
       if (loadsData) setLoads(loadsData);
 
-      const { data: podData } = await supabase
+      const { data: podData } = await db
         .from('pod_documents')
         .select('load_id, file_name')
         .in('load_id', loadsData?.map(l => l.id) || []);
@@ -81,7 +81,7 @@ const DriverDashboard: React.FC = () => {
 
   const fetchStopsAndTimestamps = async (loadId: string) => {
     // Fetch stops
-    const { data: loadStops } = await supabase
+    const { data: loadStops } = await db
       .from('load_stops')
       .select('*')
       .eq('load_id', loadId)
@@ -90,7 +90,7 @@ const DriverDashboard: React.FC = () => {
     if (loadStops) setStops(loadStops);
 
     // Fetch timestamps
-    const { data: geoData } = await supabase
+    const { data: geoData } = await db
       .from('geofence_timestamps')
       .select('*')
       .eq('load_id', loadId)
@@ -147,7 +147,7 @@ const DriverDashboard: React.FC = () => {
     try {
       const location = await getDriverLocation();
 
-      const { data, error } = await supabase.functions.invoke('here-webhook', {
+      const { data, error } = await db.functions.invoke('here-webhook', {
 
         body: {
           action: 'record',
@@ -204,7 +204,7 @@ const DriverDashboard: React.FC = () => {
 
   const handleAcceptLoad = async (load: Load) => {
     try {
-      const { data, error: updateError } = await supabase
+      const { data, error: updateError } = await db
         .from('loads')
         .update({ status: 'IN_TRANSIT', accepted_at: new Date().toISOString() })
         .eq('id', load.id)
@@ -216,7 +216,7 @@ const DriverDashboard: React.FC = () => {
         return;
       }
 
-      await supabase
+      await db
         .from('drivers')
         .update({ status: 'on_route' })
         .eq('id', user?.driver_id);
@@ -237,9 +237,9 @@ const DriverDashboard: React.FC = () => {
     try {
       for (const file of Array.from(files)) {
         const fileName = `${load.id}/${Date.now()}.${file.name.split('.').pop()}`;
-        await supabase.storage.from('pod-documents').upload(fileName, file);
-        const { data: urlData } = supabase.storage.from('pod-documents').getPublicUrl(fileName);
-        await supabase.from('pod_documents').insert({
+        await db.storage.from('pod-documents').upload(fileName, file);
+        const { data: urlData } = db.storage.from('pod-documents').getPublicUrl(fileName);
+        await db.from('pod_documents').insert({
           load_id: load.id,
           file_name: file.name,
           file_url: urlData.publicUrl,
@@ -252,21 +252,21 @@ const DriverDashboard: React.FC = () => {
         }));
       }
 
-      await supabase
+      await db
         .from('loads')
         .update({ status: 'DELIVERED', delivered_at: new Date().toISOString() })
         .eq('id', load.id);
 
       const invoiceNumber = await generateNextInvoiceNumber();
 
-      await supabase.from('invoices').insert({
+      await db.from('invoices').insert({
         invoice_number: invoiceNumber,
         load_id: load.id,
         amount: load.rate,
         status: 'PENDING',
       });
 
-      await supabase
+      await db
         .from('loads')
         .update({ status: 'INVOICED' })
         .eq('id', load.id);
@@ -274,7 +274,7 @@ const DriverDashboard: React.FC = () => {
       // Release the driver back to available after POD upload
       // Driver should be freed up once delivery is confirmed, not waiting for payment
       if (user?.driver_id) {
-        await supabase
+        await db
           .from('drivers')
           .update({ status: 'available' })
           .eq('id', user.driver_id);
@@ -283,7 +283,7 @@ const DriverDashboard: React.FC = () => {
 
       // Deactivate geofences since load is delivered
       try {
-        await supabase.functions.invoke('here-webhook', {
+        await db.functions.invoke('here-webhook', {
           body: {
             action: 'deactivate-load-geofences',
             load_id: load.id,

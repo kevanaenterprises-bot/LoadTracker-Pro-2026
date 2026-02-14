@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase, supabaseUrl, supabaseKey } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { HistoricalMarker } from '@/types/tms';
 
 import { Landmark, Volume2, VolumeX, Loader2, MapPin, BookOpen, Clock, X, ChevronDown, ChevronUp } from 'lucide-react';
@@ -48,7 +48,7 @@ const HistoryTourSection: React.FC<HistoryTourSectionProps> = ({ driverId, gpsPo
     if (!driverId) return;
     const loadHeardMarkers = async () => {
       try {
-        const { data } = await supabase
+        const { data } = await db
           .from('driver_marker_history')
           .select('marker_id')
           .eq('driver_id', driverId);
@@ -80,7 +80,7 @@ const HistoryTourSection: React.FC<HistoryTourSectionProps> = ({ driverId, gpsPo
       const latDelta = 0.005; // ~555m
       const lngDelta = 0.006; // ~555m at mid-latitudes
       
-      const { data: markers, error } = await supabase
+      const { data: markers, error } = await db
         .from('historical_markers')
         .select('*')
         .gte('latitude', gpsPosition.lat - latDelta)
@@ -224,7 +224,7 @@ const HistoryTourSection: React.FC<HistoryTourSectionProps> = ({ driverId, gpsPo
     
     if (driverId) {
       try {
-        await supabase.from('driver_marker_history').upsert({
+        await db.from('driver_marker_history').upsert({
           driver_id: driverId,
           marker_id: marker.id,
           heard_at: new Date().toISOString(),

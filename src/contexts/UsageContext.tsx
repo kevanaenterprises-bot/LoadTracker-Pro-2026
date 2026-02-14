@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { useAuth } from '@/contexts/AuthContext';
 
 export type SubscriptionTier = 'free' | 'standard';
@@ -97,7 +97,7 @@ export const UsageProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     try {
       // Fetch user's subscription tier
-      const { data: userData } = await supabase
+      const { data: userData } = await db
         .from('users')
         .select('subscription_tier')
         .eq('id', user.id)
@@ -109,7 +109,7 @@ export const UsageProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
       // Fetch current month usage
       const monthYear = getCurrentMonthYear();
-      const { data: usageData } = await supabase
+      const { data: usageData } = await db
         .from('usage_tracking')
         .select('feature, count')
         .eq('user_id', user.id)
@@ -166,7 +166,7 @@ export const UsageProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     try {
       // Upsert the usage count
-      const { error } = await supabase
+      const { error } = await db
         .from('usage_tracking')
         .upsert(
           {

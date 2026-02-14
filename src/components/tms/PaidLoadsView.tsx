@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { Load, Invoice, Payment } from '@/types/tms';
 import { ArrowLeft, CheckCircle, DollarSign, Search, Loader2, Download, CreditCard, ChevronDown, ChevronRight } from 'lucide-react';
 
@@ -34,7 +34,7 @@ const PaidLoadsView: React.FC<PaidLoadsViewProps> = ({ onBack }) => {
 
   const fetchPaidLoads = async () => {
     setLoading(true);
-    const { data } = await supabase
+    const { data } = await db
       .from('loads')
       .select('*, customer:customers(*), driver:drivers(*)')
       .eq('status', 'PAID')
@@ -43,7 +43,7 @@ const PaidLoadsView: React.FC<PaidLoadsViewProps> = ({ onBack }) => {
     if (data) {
       // Fetch invoices
       const loadIds = data.map(l => l.id);
-      const { data: invoices } = await supabase
+      const { data: invoices } = await db
         .from('invoices')
         .select('*')
         .in('load_id', loadIds);
@@ -51,7 +51,7 @@ const PaidLoadsView: React.FC<PaidLoadsViewProps> = ({ onBack }) => {
       // Fetch payments
       const invoiceIds = invoices?.map(inv => inv.id) || [];
       const { data: payments } = invoiceIds.length > 0
-        ? await supabase.from('payments').select('*').in('invoice_id', invoiceIds).order('payment_date', { ascending: true })
+        ? await db.from('payments').select('*').in('invoice_id', invoiceIds).order('payment_date', { ascending: true })
         : { data: [] };
 
       const loadsWithData = data.map((load) => {

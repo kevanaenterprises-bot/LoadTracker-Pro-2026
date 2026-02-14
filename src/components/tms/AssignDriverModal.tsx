@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, User, Phone, MapPin, Truck, Send, Loader2, CheckCircle, AlertCircle, UserMinus, Brain, Sparkles, Star, ChevronDown, ChevronUp, Zap } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { Driver, Load } from '@/types/tms';
 import { useUsage } from '@/contexts/UsageContext';
 
@@ -62,7 +62,7 @@ const AssignDriverModal: React.FC<AssignDriverModalProps> = ({ isOpen, load, onC
 
   const fetchDrivers = async () => {
     setLoading(true);
-    const { data } = await supabase
+    const { data } = await db
       .from('drivers')
       .select('*')
       .order('name');
@@ -90,7 +90,7 @@ const AssignDriverModal: React.FC<AssignDriverModalProps> = ({ isOpen, load, onC
 
     try {
       // Fetch recent loads for performance data
-      const { data: recentLoads } = await supabase
+      const { data: recentLoads } = await db
         .from('loads')
         .select('id, driver_id, status, delivered_at, delivery_date, origin_city, origin_state, dest_city, dest_state')
         .in('status', ['DELIVERED', 'PAID', 'INVOICED'])
@@ -98,13 +98,13 @@ const AssignDriverModal: React.FC<AssignDriverModalProps> = ({ isOpen, load, onC
         .limit(100);
 
       // Fetch all drivers (not just available) for AI context
-      const { data: allDrivers } = await supabase
+      const { data: allDrivers } = await db
         .from('drivers')
         .select('*')
         .eq('employment_status', 'active')
         .order('name');
 
-      const { data, error } = await supabase.functions.invoke('ai-dispatch-advisor', {
+      const { data, error } = await db.functions.invoke('ai-dispatch-advisor', {
         body: {
           load,
           drivers: allDrivers || drivers,
@@ -163,13 +163,13 @@ const AssignDriverModal: React.FC<AssignDriverModalProps> = ({ isOpen, load, onC
       const acceptanceUrl = `${window.location.origin}/driver-portal?token=${acceptanceToken}`;
 
       if (load.driver_id && load.driver_id !== selectedDriver.id) {
-        await supabase
+        await db
           .from('drivers')
           .update({ status: 'available' })
           .eq('id', load.driver_id);
       }
 
-      const { error: updateError } = await supabase
+      const { error: updateError } = await db
         .from('loads')
         .update({
           driver_id: selectedDriver.id,
@@ -181,7 +181,7 @@ const AssignDriverModal: React.FC<AssignDriverModalProps> = ({ isOpen, load, onC
 
       if (updateError) throw updateError;
 
-      await supabase
+      await db
         .from('drivers')
         .update({ status: 'on_route' })
         .eq('id', selectedDriver.id);
@@ -190,7 +190,7 @@ const AssignDriverModal: React.FC<AssignDriverModalProps> = ({ isOpen, load, onC
 
       try {
         const smsResult = await withTimeout(
-          supabase.functions.invoke('send-driver-sms', {
+          db.functions.invoke('send-driver-sms', {
             body: {
               driverPhone: selectedDriver.phone,
               driverName: selectedDriver.name,
@@ -217,11 +217,11 @@ const AssignDriverModal: React.FC<AssignDriverModalProps> = ({ isOpen, load, onC
         setSmsError(`Driver assigned! SMS error: ${smsErr.message}. Use "Resend SMS" from load details.`);
       }
 
-      supabase.functions.invoke('here-webhook', {
+      db.functions.invoke('here-webhook', {
         body: { action: 'setup-load-geofences', load_id: load.id },
       }).catch(() => {});
 
-      supabase.functions.invoke('here-webhook', {
+      db.functions.invoke('here-webhook', {
         body: { action: 'register-device', driver_id: selectedDriver.id, device_name: `${selectedDriver.name}'s Device` },
       }).catch(() => {});
 

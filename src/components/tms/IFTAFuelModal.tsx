@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { IFTAFuelPurchase, Driver } from '@/types/tms';
 import { X, Fuel } from 'lucide-react';
 
@@ -104,9 +104,9 @@ const IFTAFuelModal: React.FC<Props> = ({ isOpen, onClose, onSaved, quarter, yea
       };
 
       if (editFuel) {
-        await supabase.from('ifta_fuel_purchases').update(fuelData).eq('id', editFuel.id);
+        await db.from('ifta_fuel_purchases').update(fuelData).eq('id', editFuel.id);
       } else {
-        const { error } = await supabase.from('ifta_fuel_purchases').insert(fuelData);
+        const { error } = await db.from('ifta_fuel_purchases').insert(fuelData);
         if (error) throw error;
       }
 

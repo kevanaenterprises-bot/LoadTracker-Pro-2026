@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { Customer } from '@/types/tms';
 import { 
   ArrowLeft, Plus, Search, Building2, User, Mail, Phone, 
@@ -46,7 +46,7 @@ const CustomersView: React.FC<CustomersViewProps> = ({ onBack }) => {
 
   const fetchCustomers = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('customers')
       .select('*')
       .order('company_name');
@@ -95,12 +95,12 @@ const CustomersView: React.FC<CustomersViewProps> = ({ onBack }) => {
 
     try {
       if (editingCustomer) {
-        await supabase
+        await db
           .from('customers')
           .update(formData)
           .eq('id', editingCustomer.id);
       } else {
-        await supabase.from('customers').insert(formData);
+        await db.from('customers').insert(formData);
       }
       setModalOpen(false);
       fetchCustomers();
@@ -114,7 +114,7 @@ const CustomersView: React.FC<CustomersViewProps> = ({ onBack }) => {
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this customer?')) return;
     
-    await supabase.from('customers').delete().eq('id', id);
+    await db.from('customers').delete().eq('id', id);
     fetchCustomers();
   };
 

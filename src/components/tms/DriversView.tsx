@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase, supabaseUrl, supabaseKey } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { Driver } from '@/types/tms';
 import DriverProfileModal from './DriverProfileModal';
 import { 
@@ -79,17 +79,17 @@ const DriversView: React.FC<DriversViewProps> = ({ onBack }) => {
 
   const fetchDrivers = async () => {
     setLoading(true);
-    const { data: driversData } = await supabase.from('drivers').select('*').order('name');
+    const { data: driversData } = await db.from('drivers').select('*').order('name');
     if (driversData) setDrivers(driversData);
 
-    const { data: usersData } = await supabase
+    const { data: usersData } = await db
       .from('users')
       .select('id, email, name, driver_id')
       .eq('role', 'driver');
     if (usersData) setDriverUsers(usersData);
 
     // Fetch file counts per driver
-    const { data: fileCounts } = await supabase
+    const { data: fileCounts } = await db
       .from('driver_files')
       .select('driver_id');
     if (fileCounts) {
@@ -122,7 +122,7 @@ const DriversView: React.FC<DriversViewProps> = ({ onBack }) => {
         medical_card_number: newDriver.medical_card_number || null,
         medical_card_expiration: newDriver.medical_card_expiration || null,
       };
-      await supabase.from('drivers').insert(insertData);
+      await db.from('drivers').insert(insertData);
       setShowAddModal(false);
       setNewDriver({
         name: '', phone: '', email: '', truck_number: '', current_location: '',
@@ -142,28 +142,18 @@ const DriversView: React.FC<DriversViewProps> = ({ onBack }) => {
     e.stopPropagation();
     if (!confirm('Delete this driver? This will also delete all associated files.')) return;
     
-    await fetch(`${supabaseUrl}/rest/v1/driver_files?driver_id=eq.${id}`, {
-      method: 'DELETE',
-      headers: {
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
-      },
-    });
+    // Delete associated driver files first
+    await db.from('driver_files').delete().eq('driver_id', id);
     
-    await fetch(`${supabaseUrl}/rest/v1/drivers?id=eq.${id}`, {
-      method: 'DELETE',
-      headers: {
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
-      },
-    });
+    // Delete the driver
+    await db.from('drivers').delete().eq('id', id);
     
     fetchDrivers();
   };
 
   const handleUpdateStatus = async (id: string, status: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    await supabase.from('drivers').update({ status }).eq('id', id);
+    await db.from('drivers').update({ status }).eq('id', id);
     fetchDrivers();
   };
 
@@ -197,7 +187,7 @@ const DriversView: React.FC<DriversViewProps> = ({ onBack }) => {
 
     setSaving(true);
     try {
-      const { data: existingUser } = await supabase
+      const { data: existingUser } = await db
         .from('users')
         .select('id')
         .eq('email', newLogin.email.toLowerCase().trim())
@@ -209,7 +199,7 @@ const DriversView: React.FC<DriversViewProps> = ({ onBack }) => {
         return;
       }
 
-      const { error } = await supabase.from('users').insert({
+      const { error } = await db.from('users').insert({
         email: newLogin.email.toLowerCase().trim(),
         password_hash: newLogin.password,
         role: 'driver',
@@ -225,7 +215,7 @@ const DriversView: React.FC<DriversViewProps> = ({ onBack }) => {
       }
 
       if (newLogin.email !== selectedDriverForLogin.email) {
-        await supabase
+        await db
           .from('drivers')
           .update({ email: newLogin.email.toLowerCase().trim() })
           .eq('id', selectedDriverForLogin.id);
