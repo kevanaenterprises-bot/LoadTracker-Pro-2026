@@ -95,16 +95,25 @@ const AppLayout: React.FC = () => {
   }, [currentView]);
 
   const fetchSettings = async () => {
-    const { data: settings } = await db
-      .from('settings')
-      .select('key, value')
-      .in('key', ['fuel_surcharge_rate', 'auto_invoice_enabled']);
-    
-    if (settings) {
-      for (const s of settings) {
-        if (s.key === 'fuel_surcharge_rate') setFuelSurchargeRate(s.value || '');
-        if (s.key === 'auto_invoice_enabled') setAutoInvoiceEnabled(s.value === 'true');
+    try {
+      const { data: settings, error } = await db
+        .from('settings')
+        .select('key, value')
+        .in('key', ['fuel_surcharge_rate', 'auto_invoice_enabled']);
+      
+      if (error) {
+        console.error('[AppLayout] Error fetching settings:', error);
+        return;
       }
+      
+      if (settings) {
+        for (const s of settings) {
+          if (s.key === 'fuel_surcharge_rate') setFuelSurchargeRate(s.value || '');
+          if (s.key === 'auto_invoice_enabled') setAutoInvoiceEnabled(s.value === 'true');
+        }
+      }
+    } catch (err) {
+      console.error('[AppLayout] Failed to fetch settings:', err);
     }
   };
 

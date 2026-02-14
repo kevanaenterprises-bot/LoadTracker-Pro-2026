@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import pg from 'pg';
@@ -30,7 +30,7 @@ async function runMigration() {
     await pool.query('SELECT NOW()');
     console.log('✅ Database connection established');
 
-    // Read and execute migration file
+    // Read and execute main schema migration file
     const migrationPath = join(__dirname, '..', 'database', 'init_schema.sql');
     const migrationSQL = readFileSync(migrationPath, 'utf-8');
     
@@ -38,6 +38,29 @@ async function runMigration() {
     await pool.query(migrationSQL);
     
     console.log('✅ Database migration completed successfully');
+    
+    // Run patch migrations from migrations directory
+    const migrationsDir = join(__dirname, '..', 'database', 'migrations');
+    let patchFiles = [];
+    try {
+      patchFiles = readdirSync(migrationsDir)
+        .filter(file => file.endsWith('.sql'))
+        .sort(); // Sort to ensure migrations run in order
+    } catch (err) {
+      console.log('ℹ️  No migrations directory found, skipping patch migrations');
+    }
+
+    if (patchFiles.length > 0) {
+      console.log(`\n📦 Found ${patchFiles.length} patch migration(s)`);
+      for (const file of patchFiles) {
+        const patchPath = join(migrationsDir, file);
+        const patchSQL = readFileSync(patchPath, 'utf-8');
+        console.log(`  Running ${file}...`);
+        await pool.query(patchSQL);
+        console.log(`  ✅ ${file} completed`);
+      }
+      console.log('✅ All patch migrations completed');
+    }
     
     // Verify admin user exists
     const result = await pool.query(
