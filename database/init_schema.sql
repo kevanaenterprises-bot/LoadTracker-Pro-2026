@@ -89,7 +89,8 @@ CREATE TABLE IF NOT EXISTS locations (
   latitude DECIMAL(10, 8),
   longitude DECIMAL(11, 8),
   geofence_radius INTEGER,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_locations_company_name ON locations(company_name);
