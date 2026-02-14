@@ -5,6 +5,8 @@ import { query } from './database';
  */
 
 // API URL for REST endpoints
+// NOTE: In production, this assumes frontend and backend are served from the same origin.
+// If using separate domains (e.g., api.example.com and app.example.com), set VITE_API_URL explicitly.
 const API_URL = import.meta.env.VITE_API_URL || 
   (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
     ? 'http://localhost:3001' 

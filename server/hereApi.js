@@ -5,6 +5,24 @@
 
 const HERE_API_KEY = process.env.HERE_API_KEY;
 
+// Validate API key on module load
+if (!HERE_API_KEY) {
+  console.error('⚠️  WARNING: HERE_API_KEY environment variable is not set!');
+  console.error('   Geocoding and routing features will not work.');
+  console.error('   Get your API key from: https://developer.here.com/');
+}
+
+// Default truck specifications for route calculation
+// These represent a typical semi-truck/tractor-trailer
+const DEFAULT_TRUCK_SPECS = {
+  height: 411,        // 4.11 meters (13.5 feet)
+  width: 259,         // 2.59 meters (8.5 feet)
+  length: 2225,       // 22.25 meters (73 feet)
+  grossWeight: 36287, // 36,287 kg (80,000 lbs - US legal limit)
+  axleCount: 5,       // Standard 5-axle configuration
+  type: 'tractor',    // Tractor type
+};
+
 /**
  * Geocode an address using HERE Maps Geocoding API v7
  * @param {string} address - Street address
@@ -197,12 +215,12 @@ async function calculateTruckRoute(waypoints) {
     });
 
     // Add truck specifications (typical semi-truck)
-    url += `&truck[height]=411`; // 4.11 meters (13.5 feet)
-    url += `&truck[width]=259`; // 2.59 meters (8.5 feet)
-    url += `&truck[length]=2225`; // 22.25 meters (73 feet)
-    url += `&truck[grossWeight]=36287`; // 36,287 kg (80,000 lbs)
-    url += `&truck[axleCount]=5`;
-    url += `&truck[type]=tractor`;
+    url += `&truck[height]=${DEFAULT_TRUCK_SPECS.height}`;
+    url += `&truck[width]=${DEFAULT_TRUCK_SPECS.width}`;
+    url += `&truck[length]=${DEFAULT_TRUCK_SPECS.length}`;
+    url += `&truck[grossWeight]=${DEFAULT_TRUCK_SPECS.grossWeight}`;
+    url += `&truck[axleCount]=${DEFAULT_TRUCK_SPECS.axleCount}`;
+    url += `&truck[type]=${DEFAULT_TRUCK_SPECS.type}`;
     
     // Request polyline data
     url += `&return=polyline,summary`;

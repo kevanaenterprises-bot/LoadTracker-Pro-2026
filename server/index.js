@@ -80,6 +80,9 @@ app.post('/api/query', async (req, res) => {
 // HERE Maps API Endpoints
 
 // Get HERE API configuration (returns API key for frontend maps)
+// NOTE: This exposes the HERE API key to the frontend, which is necessary for client-side
+// map rendering. Consider implementing server-side proxying for sensitive operations or
+// using HERE's API key restrictions (domain allowlist, rate limits) to prevent abuse.
 app.get('/api/here-config', (req, res) => {
   const apiKey = process.env.HERE_API_KEY;
   if (!apiKey) {
