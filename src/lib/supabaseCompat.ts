@@ -29,6 +29,7 @@ export interface QueryBuilder {
 class PostgreSQLQueryBuilder implements QueryBuilder {
   private table: string;
   private selectColumns: string = '*';
+  private selectCalled: boolean = false;
   private whereConditions: Array<{ column: string; operator: string; value: any }> = [];
   private orderByClause: string = '';
   private limitClause: string = '';
@@ -45,6 +46,7 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
 
   select(columns: string = '*'): QueryBuilder {
     this.selectColumns = columns;
+    this.selectCalled = true;
     if (this.operation !== 'insert' && this.operation !== 'update' && this.operation !== 'delete') {
       this.operation = 'select';
     }
@@ -185,7 +187,7 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
         params.push(...values);
         
         // Add RETURNING clause if select was called
-        if (this.selectColumns) {
+        if (this.selectCalled) {
           sql += ` RETURNING ${this.selectColumns}`;
         }
         
