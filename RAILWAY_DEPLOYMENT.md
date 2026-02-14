@@ -89,7 +89,40 @@ After running the migration, you can log in with:
 - **Email**: admin@example.com
 - **Password**: admin123
 
-**Important**: Change this password after first login!
+**⚠️ CRITICAL SECURITY WARNING**: 
+- Passwords are currently stored in PLAINTEXT in the database (matching the original Supabase implementation)
+- This is INSECURE and should be fixed before production use
+- Implement proper password hashing (bcrypt, Argon2, or PBKDF2) immediately
+- Change the default password after first login
+- The generic `/api/query` endpoint should be replaced with specific authenticated endpoints
+
+## Security Considerations
+
+### Current Security Limitations
+
+1. **Plaintext Passwords**: The application currently stores passwords in plaintext to match the original Supabase implementation. This must be fixed for production use.
+
+2. **Generic Query Endpoint**: The `/api/query` endpoint accepts SQL queries from the frontend. While basic protections are in place (blocking dangerous keywords), this should be replaced with specific REST endpoints for each operation.
+
+3. **No Authentication on API**: The API endpoints don't currently require authentication. Implement JWT or session-based authentication before production deployment.
+
+### Recommended Improvements
+
+1. Implement password hashing:
+   ```javascript
+   // Install bcrypt: npm install bcrypt
+   const bcrypt = require('bcrypt');
+   const hashedPassword = await bcrypt.hash(password, 10);
+   const isValid = await bcrypt.compare(password, hashedPassword);
+   ```
+
+2. Add authentication middleware to API endpoints
+
+3. Replace `/api/query` with specific endpoints for each operation
+
+4. Implement rate limiting and request validation
+
+5. Enable proper SSL certificate verification for database connections
 
 ## API Endpoints
 

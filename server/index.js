@@ -28,9 +28,32 @@ app.get('/api/health', async (req, res) => {
 });
 
 // Generic query endpoint
+// WARNING: This endpoint should be replaced with specific authenticated endpoints in production
 app.post('/api/query', async (req, res) => {
   try {
     const { text, params } = req.body;
+    
+    // Basic validation
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ error: 'Invalid query' });
+    }
+    
+    // Prevent dangerous operations (basic security - not comprehensive)
+    const dangerousKeywords = ['DROP', 'TRUNCATE', 'ALTER', 'CREATE USER', 'GRANT', 'REVOKE'];
+    const upperQuery = text.toUpperCase();
+    
+    for (const keyword of dangerousKeywords) {
+      if (upperQuery.includes(keyword)) {
+        console.warn('Blocked dangerous query attempt:', keyword);
+        return res.status(403).json({ error: 'Query contains dangerous operations' });
+      }
+    }
+    
+    // Check for multiple statements
+    if (text.split(';').filter(s => s.trim()).length > 1) {
+      return res.status(403).json({ error: 'Multiple statements not allowed' });
+    }
+    
     const result = await pool.query(text, params);
     res.json({ rows: result.rows, rowCount: result.rowCount });
   } catch (error) {

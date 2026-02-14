@@ -234,4 +234,35 @@ export function from(table: string): QueryBuilder {
 // Create a db object that mimics Supabase's interface
 export const db = {
   from,
+  // Stub for realtime functionality (not implemented)
+  channel: (name: string) => {
+    console.warn('Realtime channels not implemented in PostgreSQL migration');
+    return {
+      on: () => ({ subscribe: () => {} }),
+      subscribe: () => {},
+    };
+  },
+  removeChannel: () => {
+    console.warn('Realtime channels not implemented in PostgreSQL migration');
+  },
+  // Stub for Edge Functions (not implemented)
+  functions: {
+    invoke: async (functionName: string, options?: any) => {
+      console.warn(`Edge function '${functionName}' not implemented in PostgreSQL migration`);
+      return { data: null, error: { message: 'Edge functions not implemented' } };
+    },
+  },
+  // Stub for storage (not implemented)
+  storage: {
+    from: (bucket: string) => ({
+      upload: async () => {
+        console.warn(`Storage upload to bucket '${bucket}' not implemented`);
+        return { data: null, error: { message: 'Storage not implemented' } };
+      },
+      remove: async () => {
+        console.warn(`Storage removal from bucket '${bucket}' not implemented`);
+        return { data: null, error: { message: 'Storage not implemented' } };
+      },
+    }),
+  },
 };
