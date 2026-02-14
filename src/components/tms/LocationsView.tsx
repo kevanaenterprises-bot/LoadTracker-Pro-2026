@@ -6,6 +6,7 @@ import {
   DollarSign, Edit2, Trash2, X, Loader2, Save, FileText,
   Truck, Package, Radar, CheckCircle, AlertTriangle, RefreshCw
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface LocationsViewProps {
   onBack: () => void;
@@ -117,11 +118,31 @@ const LocationsView: React.FC<LocationsViewProps> = ({ onBack, defaultTab = 'shi
             ? { ...loc, latitude: data.latitude, longitude: data.longitude, geofence_radius: data.geofence_radius }
             : loc
         ));
+        
+        // Show success toast
+        toast.success('Location geocoded successfully', {
+          description: `Coordinates: ${data.latitude.toFixed(6)}, ${data.longitude.toFixed(6)}`,
+        });
+        
         console.log(`Geocoded location ${locationId}: ${data.latitude}, ${data.longitude}`);
       } else {
-        console.warn(`Failed to geocode location ${locationId}:`, data?.error || error);
+        const errorMsg = data?.error || error?.message || 'Failed to geocode location';
+        
+        // Show error toast
+        toast.error('Geocoding failed', {
+          description: errorMsg,
+        });
+        
+        console.warn(`Failed to geocode location ${locationId}:`, errorMsg);
       }
-    } catch (err) {
+    } catch (err: any) {
+      const errorMsg = err?.message || 'An unexpected error occurred';
+      
+      // Show error toast
+      toast.error('Geocoding error', {
+        description: errorMsg,
+      });
+      
       console.warn(`Geocoding error for ${locationId}:`, err);
     } finally {
       setGeocodingIds(prev => {

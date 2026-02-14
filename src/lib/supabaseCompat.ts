@@ -4,6 +4,12 @@ import { query } from './database';
  * Helper functions to convert Supabase-style queries to PostgreSQL queries
  */
 
+// API URL for REST endpoints
+const API_URL = import.meta.env.VITE_API_URL || 
+  (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
+    ? 'http://localhost:3001' 
+    : typeof window !== 'undefined' ? window.location.origin : '');
+
 export interface QueryBuilder {
   select(columns?: string): QueryBuilder;
   insert(data: any): QueryBuilder;
@@ -274,6 +280,104 @@ export function from(table: string): QueryBuilder {
   return new PostgreSQLQueryBuilder(table);
 }
 
+// Helper functions for edge function API calls
+
+async function invokeGeocodeLocation(body: any) {
+  const response = await fetch(`${API_URL}/api/geocode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      address: body.address,
+      city: body.city,
+      state: body.state,
+      zip: body.zip,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    return { data: null, error: { message: error.error || 'Geocoding failed' } };
+  }
+
+  const data = await response.json();
+  return { data, error: null };
+}
+
+async function invokeGeocodeAndSaveLocation(body: any) {
+  const response = await fetch(`${API_URL}/api/geocode-and-save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      location_id: body.location_id,
+      address: body.address,
+      city: body.city,
+      state: body.state,
+      zip: body.zip,
+      geofence_radius: body.geofence_radius,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    return { data: null, error: { message: error.error || 'Geocoding failed' } };
+  }
+
+  const data = await response.json();
+  return { data, error: null };
+}
+
+async function invokeReverseGeocode(body: any) {
+  const response = await fetch(`${API_URL}/api/reverse-geocode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      latitude: body.latitude,
+      longitude: body.longitude,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    return { data: null, error: { message: error.error || 'Reverse geocoding failed' } };
+  }
+
+  const data = await response.json();
+  return { data, error: null };
+}
+
+async function invokeCalculateRoute(body: any) {
+  const response = await fetch(`${API_URL}/api/calculate-route`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      waypoints: body.waypoints,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    return { data: null, error: { message: error.error || 'Route calculation failed' } };
+  }
+
+  const data = await response.json();
+  return { data, error: null };
+}
+
+async function invokeGetMapConfig() {
+  const response = await fetch(`${API_URL}/api/here-config`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    return { data: null, error: { message: error.error || 'Failed to get map config' } };
+  }
+
+  const data = await response.json();
+  return { data, error: null };
+}
+
 // Create a db object that mimics Supabase's interface
 export const db = {
   from,
@@ -288,11 +392,47 @@ export const db = {
   removeChannel: () => {
     console.warn('Realtime channels not implemented in PostgreSQL migration');
   },
-  // Stub for Edge Functions (not implemented)
+  // Edge Functions - now calls REST API endpoints on Express server
   functions: {
     invoke: async (functionName: string, options?: any) => {
-      console.warn(`Edge function '${functionName}' not implemented in PostgreSQL migration`);
-      return { data: null, error: { message: 'Edge functions not implemented' } };
+      // Map edge function names to REST API endpoints
+      const body = options?.body || {};
+      const action = body.action;
+
+      try {
+        // Route based on action parameter
+        switch (action) {
+          case 'geocode-location':
+            return await invokeGeocodeLocation(body);
+          
+          case 'geocode-and-save-location':
+            return await invokeGeocodeAndSaveLocation(body);
+          
+          case 'reverse-geocode':
+            return await invokeReverseGeocode(body);
+          
+          case 'calculate-truck-route':
+          case 'calculate-route':
+          case 'get-route-for-load':
+            return await invokeCalculateRoute(body);
+          
+          case 'get-map-config':
+            return await invokeGetMapConfig();
+          
+          default:
+            console.warn(`Edge function action '${action}' not implemented`);
+            return { 
+              data: null, 
+              error: { message: `Action '${action}' not implemented` } 
+            };
+        }
+      } catch (error: any) {
+        console.error(`Edge function '${functionName}' error:`, error);
+        return { 
+          data: null, 
+          error: { message: error.message || 'Function invocation failed' } 
+        };
+      }
     },
   },
   // Stub for storage (not implemented)
