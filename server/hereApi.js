@@ -266,7 +266,7 @@ async function calculateTruckRoute(waypoints) {
   }
 }
 
-module.exports = {
+export default {
   geocodeAddress,
   geocodeAndSaveLocation,
   reverseGeocode,
