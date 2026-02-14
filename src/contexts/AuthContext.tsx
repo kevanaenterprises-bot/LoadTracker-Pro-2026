@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { supabase } from '@/lib/supabase';
+import { query } from '@/lib/database';
 
 export interface User {
   id: string;
@@ -54,17 +54,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('email', email.toLowerCase().trim())
-        .eq('password_hash', password)
-        .eq('is_active', true)
-        .single();
+      const result = await query(
+        `SELECT id, email, role, driver_id, name, is_active 
+         FROM users 
+         WHERE email = $1 AND password_hash = $2 AND is_active = true`,
+        [email.toLowerCase().trim(), password]
+      );
 
-      if (error || !data) {
+      if (result.rows.length === 0) {
         return { success: false, error: 'Invalid email or password' };
       }
+
+      const data = result.rows[0];
 
       const userData: User = {
         id: data.id,
@@ -76,10 +77,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       };
 
       // Update last login
-      await supabase
-        .from('users')
-        .update({ last_login: new Date().toISOString() })
-        .eq('id', data.id);
+      await query(
+        'UPDATE users SET last_login = $1 WHERE id = $2',
+        [new Date().toISOString(), data.id]
+      );
 
       // Store in localStorage
       localStorage.setItem('tms_user', JSON.stringify(userData));
@@ -99,17 +100,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const resetPassword = async (email: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      // Note: In production, consider using a hardcoded base URL or environment variable
-      // instead of window.location.origin to prevent potential open redirect vulnerabilities
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
-      });
-      
-      if (error) {
-        return { success: false, error: error.message };
-      }
-      
-      return { success: true };
+      // Password reset functionality would need to be implemented separately
+      // For now, return a message indicating this feature is not yet available
+      return { 
+        success: false, 
+        error: 'Password reset functionality is not yet implemented. Please contact your administrator.' 
+      };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to send reset email';
       return { success: false, error: errorMessage };

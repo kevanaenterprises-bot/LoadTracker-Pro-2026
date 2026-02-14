@@ -1,40 +1,41 @@
-import { Pool, QueryResult } from 'pg';
+// Database client that communicates with the API server
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-// Create a singleton pool instance
-let pool: Pool | null = null;
-
-export function getPool(): Pool {
-  if (!pool) {
-    const connectionString = import.meta.env.VITE_DATABASE_URL || process.env.DATABASE_URL;
-    
-    if (!connectionString) {
-      throw new Error('DATABASE_URL environment variable is not set');
-    }
-
-    pool = new Pool({
-      connectionString,
-      ssl: connectionString.includes('railway') ? { rejectUnauthorized: false } : undefined,
-    });
-
-    // Handle pool errors
-    pool.on('error', (err) => {
-      console.error('Unexpected error on idle PostgreSQL client', err);
-    });
-  }
-
-  return pool;
+export interface QueryResult<T = any> {
+  rows: T[];
+  rowCount: number;
 }
 
 export async function query<T = any>(text: string, params?: any[]): Promise<QueryResult<T>> {
-  const pool = getPool();
-  return pool.query<T>(text, params);
-}
+  try {
+    const response = await fetch(`${API_URL}/api/query`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text, params }),
+    });
 
-export async function closePool(): Promise<void> {
-  if (pool) {
-    await pool.end();
-    pool = null;
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Query failed');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Database query error:', error);
+    throw error;
   }
 }
 
-export { Pool, QueryResult };
+export async function healthCheck(): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_URL}/api/health`);
+    const data = await response.json();
+    return data.status === 'ok';
+  } catch (error) {
+    console.error('Health check failed:', error);
+    return false;
+  }
+}
+
