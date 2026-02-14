@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase, supabaseUrl, supabaseKey } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { HistoricalMarker } from '@/types/tms';
 
 import { Landmark, Volume2, VolumeX, Loader2, MapPin, BookOpen, Clock, X, ChevronDown, ChevronUp } from 'lucide-react';
@@ -48,7 +48,7 @@ const HistoryTourSection: React.FC<HistoryTourSectionProps> = ({ driverId, gpsPo
     if (!driverId) return;
     const loadHeardMarkers = async () => {
       try {
-        const { data } = await supabase
+        const { data } = await db
           .from('driver_marker_history')
           .select('marker_id')
           .eq('driver_id', driverId);
@@ -80,7 +80,7 @@ const HistoryTourSection: React.FC<HistoryTourSectionProps> = ({ driverId, gpsPo
       const latDelta = 0.005; // ~555m
       const lngDelta = 0.006; // ~555m at mid-latitudes
       
-      const { data: markers, error } = await supabase
+      const { data: markers, error } = await db
         .from('historical_markers')
         .select('*')
         .gte('latitude', gpsPosition.lat - latDelta)
@@ -147,73 +147,15 @@ const HistoryTourSection: React.FC<HistoryTourSectionProps> = ({ driverId, gpsPo
     setShowDetails(true);
 
     try {
-      const distanceYards = marker.distance_meters ? metersToYards(marker.distance_meters) : undefined;
-
-      const response = await fetch(
-        `${supabaseUrl}/functions/v1/narrate-marker`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${supabaseKey}`,
-          },
-          body: JSON.stringify({
-            title: marker.title,
-            subtitle: marker.subtitle,
-            description: marker.description,
-            city: marker.city,
-            state: marker.state,
-            year_erected: marker.year_erected,
-            erected_by: marker.erected_by,
-            distance_yards: distanceYards,
-          }),
-        }
-      );
-
-
-      if (!response.ok) {
-        const errText = await response.text();
-        console.error('Narration API error:', errText);
-        setAudioError('Failed to generate narration. Will retry on next approach.');
-        setIsLoadingAudio(false);
-        return;
-      }
-
-      const audioBlob = await response.blob();
-      
-      // Clean up previous audio URL
-      if (audioUrlRef.current) {
-        URL.revokeObjectURL(audioUrlRef.current);
-      }
-
-      const url = URL.createObjectURL(audioBlob);
-      audioUrlRef.current = url;
-
-      // Create and play audio
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      
-      audio.onplay = () => {
-        setIsNarrating(true);
-        setIsLoadingAudio(false);
-      };
-      
-      audio.onended = () => {
-        setIsNarrating(false);
-        // Mark as heard
-        markMarkerAsHeard(marker);
-      };
-      
-      audio.onerror = () => {
-        setIsNarrating(false);
-        setIsLoadingAudio(false);
-        setAudioError('Audio playback failed. Check your device volume.');
-      };
-
-      await audio.play();
-    } catch (err) {
-      console.error('Error narrating marker:', err);
-      setAudioError('Failed to generate narration.');
+      // TODO: Implement text-to-speech narration for historical markers
+      // This feature was previously using a Supabase Edge Function
+      // Consider implementing with a third-party TTS service or browser Web Speech API
+      console.log('Text-to-speech narration not yet implemented for PostgreSQL migration');
+      setAudioError('Text-to-speech narration is temporarily unavailable');
+      setIsLoadingAudio(false);
+    } catch (error) {
+      console.error('Error with narration:', error);
+      setAudioError('Could not load narration');
       setIsLoadingAudio(false);
     }
   };
@@ -224,7 +166,7 @@ const HistoryTourSection: React.FC<HistoryTourSectionProps> = ({ driverId, gpsPo
     
     if (driverId) {
       try {
-        await supabase.from('driver_marker_history').upsert({
+        await db.from('driver_marker_history').upsert({
           driver_id: driverId,
           marker_id: marker.id,
           heard_at: new Date().toISOString(),

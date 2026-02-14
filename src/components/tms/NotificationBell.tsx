@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { toast } from 'sonner';
 import { Bell, MapPin, Truck, ArrowDownToLine, ArrowUpFromLine, X, Check, CheckCheck, Volume2, VolumeX, Trash2 } from 'lucide-react';
 
@@ -176,7 +176,7 @@ const NotificationBell: React.FC<NotificationBellProps> = ({ loads = [] }) => {
   // Fetch recent geofence events
   const fetchRecentEvents = useCallback(async (showToastsForNew = false) => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from('geofence_timestamps')
         .select('*')
         .order('created_at', { ascending: false })
@@ -222,7 +222,7 @@ const NotificationBell: React.FC<NotificationBellProps> = ({ loads = [] }) => {
 
   // Set up realtime subscription
   useEffect(() => {
-    const channel = supabase
+    const channel = db
       .channel('geofence-events-realtime')
       .on(
         'postgres_changes',
@@ -246,7 +246,7 @@ const NotificationBell: React.FC<NotificationBellProps> = ({ loads = [] }) => {
       });
 
     return () => {
-      supabase.removeChannel(channel);
+      db.removeChannel(channel);
     };
   }, [resolveEventDetails, showEventToast]);
 

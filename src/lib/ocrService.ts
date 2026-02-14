@@ -298,7 +298,7 @@ function applyTrainingPatterns(
 export async function getTrainingPatterns(): Promise<TrainingPattern[]> {
   try {
     // Fetch recent training data to identify patterns
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('ocr_training_data')
       .select('extracted_data, corrected_data')
       .order('created_at', { ascending: false })
@@ -321,7 +321,7 @@ export async function getTrainingPatterns(): Promise<TrainingPattern[]> {
  */
 export async function saveOcrTrainingData(data: OcrTrainingData): Promise<void> {
   try {
-    const { error } = await supabase
+    const { error } = await db
       .from('ocr_training_data')
       .insert({
         load_id: data.load_id,

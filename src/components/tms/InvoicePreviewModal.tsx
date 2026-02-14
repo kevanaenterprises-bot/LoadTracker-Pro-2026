@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Download, Printer, Loader2, ShieldCheck, MapPin, Fuel, AlertTriangle, RotateCcw, Trash2, ImageOff } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { Load, Invoice, PODDocument, LoadStop, GeofenceTimestamp, CompanySettings, Customer } from '@/types/tms';
 
 interface InvoicePreviewModalProps {
@@ -50,7 +50,7 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
 
     try {
       // Fetch company settings + fuel surcharge rate in one query
-      const { data: settings } = await supabase
+      const { data: settings } = await db
         .from('settings')
         .select('key, value')
         .in('key', [
@@ -78,7 +78,7 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
 
       // Fetch customer if load has a customer_id
       if (load.customer_id) {
-        const { data: customerData } = await supabase
+        const { data: customerData } = await db
           .from('customers')
           .select('*')
           .eq('id', load.customer_id)
@@ -89,14 +89,14 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
       }
 
       // Fetch POD documents
-      const { data: docs } = await supabase
+      const { data: docs } = await db
         .from('pod_documents')
         .select('*')
         .eq('load_id', load.id);
       if (docs) setDocuments(docs);
 
       // Fetch load stops
-      const { data: loadStops } = await supabase
+      const { data: loadStops } = await db
         .from('load_stops')
         .select('*')
         .eq('load_id', load.id)
@@ -105,7 +105,7 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
       if (loadStops) setStops(loadStops);
 
       // Fetch geofence timestamps
-      const { data: geoData } = await supabase
+      const { data: geoData } = await db
         .from('geofence_timestamps')
         .select('*')
         .eq('load_id', load.id)
@@ -144,14 +144,14 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
           const urlParts = doc.file_url.split('/pod-documents/');
           if (urlParts.length > 1) {
             const storagePath = decodeURIComponent(urlParts[1]);
-            await supabase.storage.from('pod-documents').remove([storagePath]);
+            await db.storage.from('pod-documents').remove([storagePath]);
           }
         } catch {
           // Storage file already missing, that's expected
         }
 
         // Delete the database record
-        const { error } = await supabase
+        const { error } = await db
           .from('pod_documents')
           .delete()
           .eq('id', doc.id);
@@ -172,10 +172,10 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
         if (load.status === 'INVOICED' || load.status === 'DELIVERED') {
           // Delete the invoice if it exists
           if (invoice) {
-            await supabase.from('invoices').delete().eq('id', invoice.id);
+            await db.from('invoices').delete().eq('id', invoice.id);
           }
           // Reset load to IN_TRANSIT so driver portal allows re-upload
-          await supabase
+          await db
             .from('loads')
             .update({ status: 'IN_TRANSIT', delivered_at: null })
             .eq('id', load.id);
@@ -232,12 +232,12 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
           const urlParts = doc.file_url.split('/pod-documents/');
           if (urlParts.length > 1) {
             const storagePath = decodeURIComponent(urlParts[1]);
-            await supabase.storage.from('pod-documents').remove([storagePath]);
+            await db.storage.from('pod-documents').remove([storagePath]);
           }
         } catch { /* Storage file may not exist */ }
 
         // Delete the database record
-        const { error } = await supabase
+        const { error } = await db
           .from('pod_documents')
           .delete()
           .eq('id', doc.id);
@@ -247,11 +247,11 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
 
       // Delete the invoice if it exists
       if (invoice) {
-        await supabase.from('invoices').delete().eq('id', invoice.id);
+        await db.from('invoices').delete().eq('id', invoice.id);
       }
 
       // Reset load to IN_TRANSIT
-      await supabase
+      await db
         .from('loads')
         .update({ status: 'IN_TRANSIT', delivered_at: null })
         .eq('id', load.id);

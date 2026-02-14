@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { Load, Invoice, Payment, PaymentMethod } from '@/types/tms';
 import { X, DollarSign, CreditCard, Loader2, CheckCircle, AlertCircle, Trash2 } from 'lucide-react';
 
@@ -62,7 +62,7 @@ const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     if (!load) return;
     setLoading(true);
 
-    const { data: inv } = await supabase
+    const { data: inv } = await db
       .from('invoices')
       .select('*')
       .eq('load_id', load.id)
@@ -71,7 +71,7 @@ const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     if (inv) {
       setInvoice(inv);
 
-      const { data: pmts } = await supabase
+      const { data: pmts } = await db
         .from('payments')
         .select('*')
         .eq('invoice_id', inv.id)
@@ -105,7 +105,7 @@ const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     setSaving(true);
     setError('');
 
-    const { error: insertError } = await supabase.from('payments').insert({
+    const { error: insertError } = await db.from('payments').insert({
       invoice_id: invoice.id,
       load_id: load.id,
       amount: paymentAmount,
@@ -126,20 +126,20 @@ const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     const newTotalPaid = totalPaid + paymentAmount;
     if (newTotalPaid >= invoiceAmount - 0.01) {
       // Mark invoice as PAID
-      await supabase
+      await db
         .from('invoices')
         .update({ status: 'PAID', paid_at: new Date().toISOString() })
         .eq('id', invoice.id);
 
       // Mark load as PAID
-      await supabase
+      await db
         .from('loads')
         .update({ status: 'PAID' })
         .eq('id', load.id);
 
       // Release driver
       if (load.driver_id) {
-        await supabase.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
+        await db.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
       }
     }
 
@@ -156,13 +156,13 @@ const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
   const handleDeletePayment = async (payment: Payment) => {
     if (!confirm(`Delete payment of $${Number(payment.amount).toFixed(2)}?`)) return;
 
-    await supabase.from('payments').delete().eq('id', payment.id);
+    await db.from('payments').delete().eq('id', payment.id);
 
     // If load was PAID, revert to INVOICED since we removed a payment
     if (load && load.status === 'PAID') {
-      await supabase.from('loads').update({ status: 'INVOICED' }).eq('id', load.id);
+      await db.from('loads').update({ status: 'INVOICED' }).eq('id', load.id);
       if (invoice) {
-        await supabase.from('invoices').update({ status: 'PENDING', paid_at: null }).eq('id', invoice.id);
+        await db.from('invoices').update({ status: 'PENDING', paid_at: null }).eq('id', invoice.id);
       }
     }
 

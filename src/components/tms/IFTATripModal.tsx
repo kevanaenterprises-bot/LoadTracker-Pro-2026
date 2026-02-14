@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { IFTATrip, Driver } from '@/types/tms';
 import { X, Plus, Trash2, MapPin } from 'lucide-react';
 
@@ -137,12 +137,12 @@ const IFTATripModal: React.FC<Props> = ({ isOpen, onClose, onSaved, quarter, yea
       let tripId: string;
 
       if (editTrip) {
-        await supabase.from('ifta_trips').update(tripData).eq('id', editTrip.id);
+        await db.from('ifta_trips').update(tripData).eq('id', editTrip.id);
         tripId = editTrip.id;
         // Delete old state entries
-        await supabase.from('ifta_trip_states').delete().eq('ifta_trip_id', tripId);
+        await db.from('ifta_trip_states').delete().eq('ifta_trip_id', tripId);
       } else {
-        const { data, error } = await supabase.from('ifta_trips').insert(tripData).select('id').single();
+        const { data, error } = await db.from('ifta_trips').insert(tripData).select('id').single();
         if (error) throw error;
         tripId = data.id;
       }
@@ -154,7 +154,7 @@ const IFTATripModal: React.FC<Props> = ({ isOpen, onClose, onSaved, quarter, yea
         miles: parseFloat(s.miles),
       }));
 
-      await supabase.from('ifta_trip_states').insert(stateEntries);
+      await db.from('ifta_trip_states').insert(stateEntries);
 
       onSaved();
       onClose();

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { supabase, supabaseUrl, supabaseKey } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { Driver, DriverFile, DriverFileCategory } from '@/types/tms';
 import {
   X, User, Truck, Save, Loader2,
@@ -115,7 +115,7 @@ const DriverProfileModal: React.FC<DriverProfileModalProps> = ({ isOpen, driver,
 
   const fetchFiles = async (driverId: string) => {
     setLoadingFiles(true);
-    const { data } = await supabase
+    const { data } = await db
       .from('driver_files')
       .select('*')
       .eq('driver_id', driverId)
@@ -148,7 +148,7 @@ const DriverProfileModal: React.FC<DriverProfileModalProps> = ({ isOpen, driver,
         notes: form.notes || null,
       };
 
-      await supabase.from('drivers').update(updateData).eq('id', driver.id);
+      await db.from('drivers').update(updateData).eq('id', driver.id);
       onDriverUpdated();
       onClose();
     } catch (error) {
@@ -168,7 +168,7 @@ const DriverProfileModal: React.FC<DriverProfileModalProps> = ({ isOpen, driver,
         const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
         const filePath = `${driver.id}/${timestamp}_${safeName}`;
 
-        const { data: uploadData, error: uploadError } = await supabase.storage
+        const { data: uploadData, error: uploadError } = await db.storage
           .from('driver-files')
           .upload(filePath, file);
 
@@ -178,11 +178,11 @@ const DriverProfileModal: React.FC<DriverProfileModalProps> = ({ isOpen, driver,
           continue;
         }
 
-        const { data: urlData } = supabase.storage
+        const { data: urlData } = db.storage
           .from('driver-files')
           .getPublicUrl(filePath);
 
-        await supabase.from('driver_files').insert({
+        await db.from('driver_files').insert({
           driver_id: driver.id,
           file_name: file.name,
           file_url: urlData.publicUrl,
@@ -207,19 +207,8 @@ const DriverProfileModal: React.FC<DriverProfileModalProps> = ({ isOpen, driver,
   const handleDeleteFile = async (file: DriverFile) => {
     if (!confirm(`Delete "${file.file_name}"?`)) return;
 
-    // Extract path from URL for storage deletion
-    const pathMatch = file.file_url.match(/driver-files\/(.+)$/);
-    if (pathMatch) {
-      await supabase.storage.from('driver-files').remove([pathMatch[1]]);
-    }
-
-    await fetch(`${supabaseUrl}/rest/v1/driver_files?id=eq.${file.id}`, {
-      method: 'DELETE',
-      headers: {
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
-      },
-    });
+    // Delete file record from database
+    await db.from('driver_files').delete().eq('id', file.id);
 
     if (driver) fetchFiles(driver.id);
   };
@@ -229,7 +218,7 @@ const DriverProfileModal: React.FC<DriverProfileModalProps> = ({ isOpen, driver,
     if (!confirm(`Are you sure you want to terminate ${driver.name}? This will set their status to off_duty.`)) return;
     
     const today = new Date().toISOString().split('T')[0];
-    await supabase.from('drivers').update({
+    await db.from('drivers').update({
       employment_status: 'terminated',
       termination_date: today,
       status: 'off_duty',
@@ -244,7 +233,7 @@ const DriverProfileModal: React.FC<DriverProfileModalProps> = ({ isOpen, driver,
     if (!confirm(`Rehire ${driver.name}?`)) return;
     
     const today = new Date().toISOString().split('T')[0];
-    await supabase.from('drivers').update({
+    await db.from('drivers').update({
       employment_status: 'active',
       termination_date: null,
       hire_date: today,

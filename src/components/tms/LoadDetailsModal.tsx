@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, MapPin, Calendar, Package, DollarSign, User, Truck, FileText, Download, Clock, Pencil, Trash2, Eye, Radar, ShieldCheck, Loader2, Wifi, WifiOff, Activity, AlertTriangle, Send, Phone, UserMinus, UserPlus, CheckCircle, Mail, AlertCircle } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { generateNextInvoiceNumber } from '@/lib/invoiceUtils';
 import { Load, PODDocument, Invoice, LoadStop } from '@/types/tms';
 
@@ -120,7 +120,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
     setLoading(true);
 
     // Fetch POD documents
-    const { data: docs } = await supabase
+    const { data: docs } = await db
       .from('pod_documents')
       .select('*')
       .eq('load_id', load.id);
@@ -130,7 +130,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
     if (docs) setDocuments(docs);
 
     // Fetch invoice
-    const { data: inv } = await supabase
+    const { data: inv } = await db
       .from('invoices')
       .select('*')
       .eq('load_id', load.id)
@@ -139,7 +139,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
     if (inv) setInvoice(inv);
 
     // Fetch load stops
-    const { data: loadStops } = await supabase
+    const { data: loadStops } = await db
       .from('load_stops')
       .select('*')
       .eq('load_id', load.id)
@@ -165,7 +165,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
     
     for (const stop of loadStops) {
       if (stop.location_id) {
-        const { data: loc } = await supabase
+        const { data: loc } = await db
           .from('locations')
           .select('latitude, longitude, geofence_radius')
           .eq('id', stop.location_id)
@@ -192,7 +192,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
 
   const fetchGeofenceData = async (loadId: string) => {
     try {
-      const { data, error } = await supabase.functions.invoke('here-webhook', {
+      const { data, error } = await db.functions.invoke('here-webhook', {
         body: {
           action: 'get-load-geofences',
           load_id: loadId,
@@ -217,7 +217,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
       for (const stop of stops) {
         if (!stop.location_id) {
           const locationType = stop.stop_type === 'pickup' ? 'shipper' : 'receiver';
-          const { data: newLoc, error: locError } = await supabase
+          const { data: newLoc, error: locError } = await db
             .from('locations')
             .insert({
               company_name: stop.company_name || `${stop.city}, ${stop.state}`,
@@ -243,7 +243,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
           }
 
           if (newLoc) {
-            await supabase
+            await db
               .from('load_stops')
               .update({ location_id: newLoc.id })
               .eq('id', stop.id);
@@ -265,7 +265,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
         if (!stop.location_id) continue;
 
         // Check if location already has coordinates
-        const { data: locData } = await supabase
+        const { data: locData } = await db
           .from('locations')
           .select('latitude, longitude, address, city, state, zip, geofence_radius')
           .eq('id', stop.location_id)
@@ -287,7 +287,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
 
         try {
           // Use geocode-location action (fast path - no Supabase needed in edge function)
-          const { data: geoResult, error: geoError } = await supabase.functions.invoke('here-webhook', {
+          const { data: geoResult, error: geoError } = await db.functions.invoke('here-webhook', {
             body: {
               action: 'geocode-location',
               address: addressToGeocode,
@@ -301,7 +301,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
 
           if (geoResult?.success && geoResult.latitude && geoResult.longitude) {
             // Update location directly from frontend (bypasses edge function Supabase client issues)
-            const { error: updateError } = await supabase
+            const { error: updateError } = await db
               .from('locations')
               .update({
                 latitude: geoResult.latitude,
@@ -334,7 +334,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
       // STEP 3: Create geofence records directly from frontend
       if (geocodeSuccessCount > 0) {
         // Deactivate any existing geofences for this load
-        await supabase
+        await db
           .from('here_geofences')
           .update({ status: 'inactive', updated_at: new Date().toISOString() })
           .eq('load_id', loadId);
@@ -348,7 +348,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
           if (!stop.location_id) continue;
 
           // Get the freshly geocoded coordinates
-          const { data: loc } = await supabase
+          const { data: loc } = await db
             .from('locations')
             .select('latitude, longitude, geofence_radius')
             .eq('id', stop.location_id)
@@ -360,7 +360,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
             const gfName = `${stop.stop_type === 'pickup' ? 'Pickup' : 'Delivery'} - ${stop.company_name || stop.city || 'Stop'}`;
             const gfId = `gf_${loadId}_${stop.id}`.substring(0, 64);
 
-            const { error: insertErr } = await supabase
+            const { error: insertErr } = await db
               .from('here_geofences')
               .insert({
                 load_id: loadId,
@@ -387,10 +387,10 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
         }
 
         // Enable tracking on the load
-        await supabase.from('loads').update({ tracking_enabled: true }).eq('id', loadId);
+        await db.from('loads').update({ tracking_enabled: true }).eq('id', loadId);
 
         // Calculate total miles from geofence points
-        const { data: activeGf } = await supabase
+        const { data: activeGf } = await db
           .from('here_geofences')
           .select('center_lat, center_lng')
           .eq('load_id', loadId)
@@ -409,7 +409,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
             totalMeters += R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
           }
           const totalMiles = Math.round((totalMeters / 1609.344) * 10) / 10;
-          await supabase.from('loads').update({ total_miles: totalMiles }).eq('id', loadId);
+          await db.from('loads').update({ total_miles: totalMiles }).eq('id', loadId);
         }
 
         if (currentLoadIdRef.current !== loadId || !isMountedRef.current) return;
@@ -429,7 +429,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
 
       // Refresh location geofence status
       if (currentLoadIdRef.current === loadId && isMountedRef.current) {
-        const { data: updatedStops } = await supabase
+        const { data: updatedStops } = await db
           .from('load_stops')
           .select('*')
           .eq('load_id', loadId)
@@ -471,12 +471,12 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
       let token = load.acceptance_token;
       if (!token) {
         token = Math.random().toString(36).substring(2) + Date.now().toString(36);
-        await supabase.from('loads').update({ acceptance_token: token }).eq('id', load.id);
+        await db.from('loads').update({ acceptance_token: token }).eq('id', load.id);
       }
 
       const acceptanceUrl = `${window.location.origin}/driver-portal?token=${token}`;
 
-      const { data: smsData, error: smsError } = await supabase.functions.invoke('send-driver-sms', {
+      const { data: smsData, error: smsError } = await db.functions.invoke('send-driver-sms', {
         body: {
           driverPhone: load.driver.phone,
           driverName: load.driver.name,
@@ -511,13 +511,13 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
 
     try {
       // Release the driver back to available
-      await supabase
+      await db
         .from('drivers')
         .update({ status: 'available' })
         .eq('id', load.driver_id);
 
       // Update the load - remove driver, clear token, set back to UNASSIGNED
-      await supabase
+      await db
         .from('loads')
         .update({
           driver_id: null,
@@ -528,7 +528,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
         .eq('id', load.id);
 
       // Deactivate geofences (fire-and-forget)
-      supabase.functions.invoke('here-webhook', {
+      db.functions.invoke('here-webhook', {
         body: { action: 'deactivate-load-geofences', load_id: load.id },
       }).catch((err) => {
         console.warn('Geofence deactivation failed (non-critical):', err);
@@ -566,7 +566,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
       const totalAmount = Number(load.rate || 0) + Number(load.extra_stop_fee || 0) + Number(load.lumper_fee || 0);
 
 
-      const { data: newInv, error } = await supabase.from('invoices').insert({
+      const { data: newInv, error } = await db.from('invoices').insert({
         invoice_number: invoiceNumber,
         load_id: load.id,
         amount: totalAmount,
@@ -578,10 +578,10 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
         return;
       }
 
-      await supabase.from('loads').update({ status: 'INVOICED' }).eq('id', load.id);
+      await db.from('loads').update({ status: 'INVOICED' }).eq('id', load.id);
 
       if (load.driver_id) {
-        await supabase.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
+        await db.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
       }
 
       if (newInv) setInvoice(newInv);
@@ -628,7 +628,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
       } else {
         // Otherwise fetch it
         console.log('[Invoice Email] Fetching customer data for ID:', load.customer_id);
-        const { data: customerData, error: customerError } = await supabase
+        const { data: customerData, error: customerError } = await db
           .from('customers')
           .select('email, company_name')
           .eq('id', load.customer_id)
@@ -679,7 +679,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
       }, 30000);
 
       try {
-        const { data, error } = await supabase.functions.invoke('send-invoice-email', {
+        const { data, error } = await db.functions.invoke('send-invoice-email', {
           body: { load_id: load.id },
         });
         

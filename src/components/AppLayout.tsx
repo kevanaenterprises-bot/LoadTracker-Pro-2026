@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { generateNextInvoiceNumber } from '@/lib/invoiceUtils';
 
 import { useAuth } from '@/contexts/AuthContext';
@@ -94,7 +94,7 @@ const AppLayout: React.FC = () => {
   }, [currentView]);
 
   const fetchSettings = async () => {
-    const { data: settings } = await supabase
+    const { data: settings } = await db
       .from('settings')
       .select('key, value')
       .in('key', ['fuel_surcharge_rate', 'auto_invoice_enabled']);
@@ -110,7 +110,7 @@ const AppLayout: React.FC = () => {
   const saveSetting = async (key: string, value: string) => {
     setSavingSettings(true);
     // Upsert the setting
-    const { error } = await supabase
+    const { error } = await db
       .from('settings')
       .upsert({ key, value }, { onConflict: 'key' });
     if (error) {
@@ -144,7 +144,7 @@ const AppLayout: React.FC = () => {
       );
       
       if (!hasActiveLoad) {
-        const { data: activeLoads } = await supabase
+        const { data: activeLoads } = await db
           .from('loads')
           .select('id')
           .eq('driver_id', driver.id)
@@ -153,7 +153,7 @@ const AppLayout: React.FC = () => {
         
         if (!activeLoads || activeLoads.length === 0) {
           console.log(`Auto-releasing driver ${driver.name} (${driver.id}) - no active loads found`);
-          await supabase
+          await db
             .from('drivers')
             .update({ status: 'available' })
             .eq('id', driver.id);
@@ -172,7 +172,7 @@ const AppLayout: React.FC = () => {
     const loadIds = invoicedLoads.map(l => l.id);
 
     // Fetch invoices for these loads
-    const { data: invoices } = await supabase
+    const { data: invoices } = await db
       .from('invoices')
       .select('*')
       .in('load_id', loadIds);
@@ -185,7 +185,7 @@ const AppLayout: React.FC = () => {
     const invoiceIds = invoices.map(inv => inv.id);
 
     // Fetch payments for these invoices
-    const { data: payments } = await supabase
+    const { data: payments } = await db
       .from('payments')
       .select('*')
       .in('invoice_id', invoiceIds);
@@ -219,13 +219,13 @@ const AppLayout: React.FC = () => {
   const fetchData = async () => {
     setLoading(true);
     
-    const { data: loadsData } = await supabase
+    const { data: loadsData } = await db
       .from('loads')
       .select('*, customer:customers(*), driver:drivers(*)')
       .neq('status', 'PAID')
       .order('delivery_date', { ascending: true });
     
-    const { data: driversData } = await supabase
+    const { data: driversData } = await db
       .from('drivers')
       .select('*')
       .order('name');
@@ -240,7 +240,7 @@ const AppLayout: React.FC = () => {
 
     if (loadsData && driversData) {
       cleanupStaleDriverStatuses(loadsData, driversData).then(() => {
-        supabase.from('drivers').select('*').order('name').then(({ data }) => {
+        db.from('drivers').select('*').order('name').then(({ data }) => {
           if (data) setDrivers(data);
         });
       });
@@ -277,30 +277,15 @@ const AppLayout: React.FC = () => {
     }
     
     try {
-      const supabaseUrl = 'https://tlksfrowyjprvjerydrp.databasepad.com';
-      const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImZlMDM0ZDk3LWI2ZjctNGMzYy1hNjk5LWNlZDVlMDY1NjQxMCJ9.eyJwcm9qZWN0SWQiOiJ0bGtzZnJvd3lqcHJ2amVyeWRycCIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzcwMjQxMjY3LCJleHAiOjIwODU2MDEyNjcsImlzcyI6ImZhbW91cy5kYXRhYmFzZXBhZCIsImF1ZCI6ImZhbW91cy5jbGllbnRzIn0.yONwNzlthOzRbUbS6YaOJpx3YAO94QiSLCaue3NqjXo';
-      
-      const headers = {
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`,
-      };
-
-      // Delete payments first (new)
-      await fetch(`${supabaseUrl}/rest/v1/payments?load_id=eq.${load.id}`, { method: 'DELETE', headers });
-      await fetch(`${supabaseUrl}/rest/v1/load_stops?load_id=eq.${load.id}`, { method: 'DELETE', headers });
-      await fetch(`${supabaseUrl}/rest/v1/pod_documents?load_id=eq.${load.id}`, { method: 'DELETE', headers });
-      await fetch(`${supabaseUrl}/rest/v1/invoices?load_id=eq.${load.id}`, { method: 'DELETE', headers });
-
-      const loadResponse = await fetch(`${supabaseUrl}/rest/v1/loads?id=eq.${load.id}`, { method: 'DELETE', headers });
-
-      if (!loadResponse.ok) {
-        const errorText = await loadResponse.text();
-        alert(`Failed to delete load: ${errorText}`);
-        return;
-      }
+      // Delete associated records in correct order (PostgreSQL will handle cascades based on schema)
+      await db.from('payments').delete().eq('load_id', load.id);
+      await db.from('load_stops').delete().eq('load_id', load.id);
+      await db.from('pod_documents').delete().eq('load_id', load.id);
+      await db.from('invoices').delete().eq('load_id', load.id);
+      await db.from('loads').delete().eq('id', load.id);
 
       if (load.driver_id) {
-        await supabase.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
+        await db.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
       }
       
       setDetailsModalOpen(false);
@@ -312,17 +297,17 @@ const AppLayout: React.FC = () => {
   };
 
   const handleMarkDelivered = async (load: Load) => {
-    await supabase
+    await db
       .from('loads')
       .update({ status: 'DELIVERED', delivered_at: new Date().toISOString() })
       .eq('id', load.id);
 
     if (load.driver_id) {
-      await supabase.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
+      await db.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
     }
 
     try {
-      await supabase.functions.invoke('here-webhook', {
+      await db.functions.invoke('here-webhook', {
         body: { action: 'deactivate-load-geofences', load_id: load.id },
       });
     } catch (err) {
@@ -339,20 +324,20 @@ const AppLayout: React.FC = () => {
     const invoiceNumber = await generateNextInvoiceNumber();
     const totalAmount = Number(load.rate || 0) + Number(load.extra_stop_fee || 0) + Number(load.lumper_fee || 0);
 
-    await supabase.from('invoices').insert({
+    await db.from('invoices').insert({
       invoice_number: invoiceNumber,
       load_id: load.id,
       amount: totalAmount,
       status: 'PENDING',
     });
 
-    await supabase
+    await db
       .from('loads')
       .update({ status: 'INVOICED' })
       .eq('id', load.id);
 
     if (load.driver_id) {
-      await supabase.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
+      await db.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
     }
 
     fetchData();

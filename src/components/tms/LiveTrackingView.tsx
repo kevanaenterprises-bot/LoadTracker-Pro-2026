@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import {
   ArrowLeft, RefreshCw, Loader2, MapPin, Truck, Phone,
   Battery, Signal, Clock, Navigation, ChevronLeft, ChevronRight,
@@ -115,7 +115,7 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
       const MAX_RETRIES = 2;
       try {
         console.log(`[LiveTracking] Fetching map config (attempt ${attempt}/${MAX_RETRIES})...`);
-        const { data, error } = await supabase.functions.invoke('here-webhook', {
+        const { data, error } = await db.functions.invoke('here-webhook', {
           body: { action: 'get-map-config' },
         });
         if (cancelled) return;
@@ -290,7 +290,7 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
     console.log('[LiveTracking] Fetching drivers... showAllDrivers=' + showAllDrivers);
     try {
       // PRIMARY: Direct DB query (edge function has URL parsing issues)
-      let query = supabase
+      let query = db
         .from('drivers')
         .select('id, name, phone, truck_number, status, current_location, last_known_lat, last_known_lng, last_position_update, last_known_speed, last_known_heading, battery_level')
         .order('name');
@@ -307,7 +307,7 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
         setFetchMethod('DB query failed: ' + driversError.message);
         // Try edge function as fallback
         try {
-          const { data } = await supabase.functions.invoke('here-webhook', {
+          const { data } = await db.functions.invoke('here-webhook', {
             body: { action: 'get-all-driver-locations', include_inactive: showAllDrivers },
           });
           if (data?.success && data.drivers) {
@@ -334,7 +334,7 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
       const driverIds = (driversData || []).map(d => d.id);
       let activeLoads: any[] = [];
       if (driverIds.length > 0) {
-        const { data: loadsData } = await supabase
+        const { data: loadsData } = await db
           .from('loads')
           .select('id, load_number, driver_id, status, origin_city, origin_state, dest_city, dest_state, cargo_description')
           .in('driver_id', driverIds)
@@ -575,7 +575,7 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
   // Fetch and display driver trail
   const fetchDriverTrail = async (driverId: string) => {
     try {
-      const { data } = await supabase.functions.invoke('here-webhook', {
+      const { data } = await db.functions.invoke('here-webhook', {
         body: { action: 'get-driver-trail', driver_id: driverId, hours: trailHours },
       });
 
@@ -652,7 +652,7 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
 
     const reverseGeocode = async () => {
       try {
-        const { data } = await supabase.functions.invoke('here-webhook', {
+        const { data } = await db.functions.invoke('here-webhook', {
           body: {
             action: 'reverse-geocode',
             latitude: selectedDriver.last_known_lat,

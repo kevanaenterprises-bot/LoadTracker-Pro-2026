@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 
 /**
  * Generate the next sequential invoice number starting with GO7500.
@@ -12,7 +12,7 @@ export const generateNextInvoiceNumber = async (): Promise<string> => {
 
   try {
     // Fetch all invoices with GO prefix to find the highest number
-    const { data: invoices, error } = await supabase
+    const { data: invoices, error } = await db
       .from('invoices')
       .select('invoice_number')
       .like('invoice_number', 'GO%')

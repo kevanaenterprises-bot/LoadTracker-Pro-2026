@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { Driver, IFTATrip, IFTATripState, IFTAFuelPurchase } from '@/types/tms';
 import IFTATripModal from './IFTATripModal';
 import IFTAFuelModal from './IFTAFuelModal';
@@ -66,15 +66,15 @@ const IFTAReportView: React.FC<Props> = ({ onBack }) => {
   }, [quarter, year]);
 
   const fetchDrivers = async () => {
-    const { data } = await supabase.from('drivers').select('*').order('name');
+    const { data } = await db.from('drivers').select('*').order('name');
     if (data) setDrivers(data);
   };
 
   const fetchData = async () => {
     setLoading(true);
     const [tripsRes, fuelRes] = await Promise.all([
-      supabase.from('ifta_trips').select('*, states:ifta_trip_states(*)').eq('quarter', quarter).eq('year', year).order('trip_date', { ascending: false }),
-      supabase.from('ifta_fuel_purchases').select('*').eq('quarter', quarter).eq('year', year).order('purchase_date', { ascending: false }),
+      db.from('ifta_trips').select('*, states:ifta_trip_states(*)').eq('quarter', quarter).eq('year', year).order('trip_date', { ascending: false }),
+      db.from('ifta_fuel_purchases').select('*').eq('quarter', quarter).eq('year', year).order('purchase_date', { ascending: false }),
     ]);
     if (tripsRes.data) setTrips(tripsRes.data);
     if (fuelRes.data) setFuelPurchases(fuelRes.data);
@@ -159,7 +159,7 @@ const IFTAReportView: React.FC<Props> = ({ onBack }) => {
         : `${year}-${String(endMonth + 1).padStart(2, '0')}-01`;
 
       // Fetch delivered/invoiced/paid loads in this quarter
-      const { data: loads } = await supabase
+      const { data: loads } = await db
         .from('loads')
         .select('*, driver:drivers(*)')
         .in('status', ['DELIVERED', 'INVOICED', 'PAID'])
@@ -186,7 +186,7 @@ const IFTAReportView: React.FC<Props> = ({ onBack }) => {
       // Fetch GPS-tracked state mileage for this quarter
       let gpsTrackedMiles: Record<string, Array<{ state_code: string; miles: number }>> = {};
       try {
-        const { data: gpsMiles } = await supabase
+        const { data: gpsMiles } = await db
           .from('ifta_state_mileage')
           .select('*')
           .eq('quarter', quarter)
@@ -215,7 +215,7 @@ const IFTAReportView: React.FC<Props> = ({ onBack }) => {
         const totalMiles = Number(load.total_miles) || 0;
 
         // Create trip
-        const { data: tripData, error: tripError } = await supabase.from('ifta_trips').insert({
+        const { data: tripData, error: tripError } = await db.from('ifta_trips').insert({
           driver_id: load.driver_id,
           load_id: load.id,
           truck_number: truckNum,
@@ -273,7 +273,7 @@ const IFTAReportView: React.FC<Props> = ({ onBack }) => {
         }
 
         if (stateEntries.length > 0) {
-          await supabase.from('ifta_trip_states').insert(stateEntries);
+          await db.from('ifta_trip_states').insert(stateEntries);
         }
         imported++;
       }
@@ -294,14 +294,14 @@ const IFTAReportView: React.FC<Props> = ({ onBack }) => {
 
   const handleDeleteTrip = async (tripId: string) => {
     if (!confirm('Delete this trip? This cannot be undone.')) return;
-    await supabase.from('ifta_trip_states').delete().eq('ifta_trip_id', tripId);
-    await supabase.from('ifta_trips').delete().eq('id', tripId);
+    await db.from('ifta_trip_states').delete().eq('ifta_trip_id', tripId);
+    await db.from('ifta_trips').delete().eq('id', tripId);
     fetchData();
   };
 
   const handleDeleteFuel = async (fuelId: string) => {
     if (!confirm('Delete this fuel purchase? This cannot be undone.')) return;
-    await supabase.from('ifta_fuel_purchases').delete().eq('id', fuelId);
+    await db.from('ifta_fuel_purchases').delete().eq('id', fuelId);
     fetchData();
   };
 

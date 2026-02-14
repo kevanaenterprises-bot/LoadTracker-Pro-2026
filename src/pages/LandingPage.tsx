@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import DemoExperience from '@/components/DemoExperience';
 import {
   Truck, MapPin, FileText, Users, DollarSign, Fuel, Shield, Radar,
@@ -45,7 +45,7 @@ const LandingPage: React.FC = () => {
     setFormSubmitting(true);
 
     try {
-      await supabase.from('demo_visitors').insert({
+      await db.from('demo_visitors').insert({
         name: formData.name.trim(),
         company_name: formData.company.trim() || null,
         email: formData.email.trim() || null,

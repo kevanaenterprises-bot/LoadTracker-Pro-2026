@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, MapPin, Calendar, Package, DollarSign, Loader2, Hash, Building2, ChevronDown, Plus, Trash2, Truck, User, Radar, AlertCircle, CheckCircle, Route, Send } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { Customer, Location, Load, LoadStop, Driver } from '@/types/tms';
 
 
@@ -122,7 +122,7 @@ const EditLoadModal: React.FC<EditLoadModalProps> = ({ isOpen, load, onClose, on
   const fetchLoadStops = async () => {
     if (!load) return;
     
-    const { data: stops } = await supabase
+    const { data: stops } = await db
       .from('load_stops')
       .select('*')
       .eq('load_id', load.id)
@@ -187,7 +187,7 @@ const EditLoadModal: React.FC<EditLoadModalProps> = ({ isOpen, load, onClose, on
   };
 
   const fetchCustomers = async () => {
-    const { data } = await supabase.from('customers').select('*').order('company_name');
+    const { data } = await db.from('customers').select('*').order('company_name');
     if (data) {
       setCustomers(data);
       if (load?.customer_id) {
@@ -198,12 +198,12 @@ const EditLoadModal: React.FC<EditLoadModalProps> = ({ isOpen, load, onClose, on
   };
 
   const fetchDrivers = async () => {
-    const { data } = await supabase.from('drivers').select('*').order('name');
+    const { data } = await db.from('drivers').select('*').order('name');
     if (data) setDrivers(data);
   };
 
   const fetchLocations = async () => {
-    const { data } = await supabase.from('locations').select('*').order('company_name');
+    const { data } = await db.from('locations').select('*').order('company_name');
     if (data) {
       setShippers(data.filter(l => l.location_type === 'shipper'));
       setReceivers(data.filter(l => l.location_type === 'receiver'));
@@ -274,7 +274,7 @@ const EditLoadModal: React.FC<EditLoadModalProps> = ({ isOpen, load, onClose, on
       // First save the current stops so geofences can be created
       await saveStops();
 
-      const { data, error } = await supabase.functions.invoke('here-webhook', {
+      const { data, error } = await db.functions.invoke('here-webhook', {
         body: {
           action: 'setup-load-geofences',
           load_id: load.id,
@@ -310,7 +310,7 @@ const EditLoadModal: React.FC<EditLoadModalProps> = ({ isOpen, load, onClose, on
       // Save stops first
       await saveStops();
 
-      const { data, error } = await supabase.functions.invoke('here-webhook', {
+      const { data, error } = await db.functions.invoke('here-webhook', {
         body: {
           action: 'calculate-route',
           load_id: load.id,
@@ -332,7 +332,7 @@ const EditLoadModal: React.FC<EditLoadModalProps> = ({ isOpen, load, onClose, on
   const saveStops = async () => {
     if (!load) return;
     // Delete existing stops
-    await supabase.from('load_stops').delete().eq('load_id', load.id);
+    await db.from('load_stops').delete().eq('load_id', load.id);
 
     // Insert all stops
     const stopsToInsert = [
@@ -366,7 +366,7 @@ const EditLoadModal: React.FC<EditLoadModalProps> = ({ isOpen, load, onClose, on
       })),
     ];
 
-    await supabase.from('load_stops').insert(stopsToInsert);
+    await db.from('load_stops').insert(stopsToInsert);
   };
 
   const generateAcceptanceToken = () => {
@@ -393,11 +393,11 @@ const EditLoadModal: React.FC<EditLoadModalProps> = ({ isOpen, load, onClose, on
       if (newDriverId !== oldDriverId) {
         // Release old driver
         if (oldDriverId) {
-          await supabase.from('drivers').update({ status: 'available' }).eq('id', oldDriverId);
+          await db.from('drivers').update({ status: 'available' }).eq('id', oldDriverId);
         }
         // Assign new driver
         if (newDriverId) {
-          await supabase.from('drivers').update({ status: 'on_route' }).eq('id', newDriverId);
+          await db.from('drivers').update({ status: 'on_route' }).eq('id', newDriverId);
           if (load.status === 'UNASSIGNED') {
             newStatus = 'DISPATCHED';
           }
@@ -440,14 +440,14 @@ const EditLoadModal: React.FC<EditLoadModalProps> = ({ isOpen, load, onClose, on
         updatePayload.accepted_at = null;
       }
 
-      const { error: loadError } = await supabase.from('loads').update(updatePayload).eq('id', load.id);
+      const { error: loadError } = await db.from('loads').update(updatePayload).eq('id', load.id);
 
       if (loadError) throw loadError;
       await saveStops();
 
       // Always auto-setup geofences after saving stops (fire-and-forget)
       // This ensures geofences are created/updated whenever stops change
-      supabase.functions.invoke('here-webhook', {
+      db.functions.invoke('here-webhook', {
         body: {
           action: 'auto-setup-geofences',
           load_id: load.id,
@@ -471,7 +471,7 @@ const EditLoadModal: React.FC<EditLoadModalProps> = ({ isOpen, load, onClose, on
           console.log(`Sending dispatch SMS to ${newDriver.name} (${newDriver.phone}) for load ${formData.load_number}`);
 
           // Fire-and-forget SMS - don't block the save
-          supabase.functions.invoke('send-driver-sms', {
+          db.functions.invoke('send-driver-sms', {
             body: {
               driverPhone: newDriver.phone,
               driverName: newDriver.name,
@@ -497,7 +497,7 @@ const EditLoadModal: React.FC<EditLoadModalProps> = ({ isOpen, load, onClose, on
           });
 
           // Fire-and-forget device registration
-          supabase.functions.invoke('here-webhook', {
+          db.functions.invoke('here-webhook', {
             body: {
               action: 'register-device',
               driver_id: newDriverId,

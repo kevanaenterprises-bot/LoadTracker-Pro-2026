@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { Location, LocationType } from '@/types/tms';
 import { 
   ArrowLeft, Plus, Search, MapPin, Building2, User, Phone, 
@@ -50,7 +50,7 @@ const LocationsView: React.FC<LocationsViewProps> = ({ onBack, defaultTab = 'shi
 
   const fetchLocations = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('locations')
       .select('*')
       .order('company_name');
@@ -98,7 +98,7 @@ const LocationsView: React.FC<LocationsViewProps> = ({ onBack, defaultTab = 'shi
   const geocodeLocation = async (locationId: string, address: string, city: string, state: string, zip: string, geofenceRadius?: number) => {
     setGeocodingIds(prev => new Set(prev).add(locationId));
     try {
-      const { data, error } = await supabase.functions.invoke('here-webhook', {
+      const { data, error } = await db.functions.invoke('here-webhook', {
         body: {
           action: 'geocode-and-save-location',
           location_id: locationId,
@@ -152,7 +152,7 @@ const LocationsView: React.FC<LocationsViewProps> = ({ onBack, defaultTab = 'shi
 
     try {
       if (editingLocation) {
-        const { error } = await supabase
+        const { error } = await db
           .from('locations')
           .update(submitData)
           .eq('id', editingLocation.id);
@@ -169,7 +169,7 @@ const LocationsView: React.FC<LocationsViewProps> = ({ onBack, defaultTab = 'shi
           );
         }
       } else {
-        const { data: inserted, error } = await supabase
+        const { data: inserted, error } = await db
           .from('locations')
           .insert(submitData)
           .select()
@@ -199,7 +199,7 @@ const LocationsView: React.FC<LocationsViewProps> = ({ onBack, defaultTab = 'shi
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this location?')) return;
     
-    await supabase.from('locations').delete().eq('id', id);
+    await db.from('locations').delete().eq('id', id);
     fetchLocations();
   };
 

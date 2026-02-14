@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import {
   ArrowLeft, UserPlus, Shield, User, Truck, Mail, Lock, Eye, EyeOff,
   Search, MoreVertical, CheckCircle, XCircle, Pencil, KeyRound, Loader2,
@@ -70,8 +70,8 @@ const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onBack }) => 
   const fetchData = async () => {
     setLoading(true);
     const [usersRes, driversRes] = await Promise.all([
-      supabase.from('users').select('*').order('created_at', { ascending: false }),
-      supabase.from('drivers').select('id, name, email').order('name'),
+      db.from('users').select('*').order('created_at', { ascending: false }),
+      db.from('drivers').select('id, name, email').order('name'),
     ]);
     if (usersRes.data) setUsers(usersRes.data);
     if (driversRes.data) setDrivers(driversRes.data);
@@ -108,7 +108,7 @@ const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onBack }) => 
       return;
     }
 
-    const { error } = await supabase.from('users').insert({
+    const { error } = await db.from('users').insert({
       email: formEmail.toLowerCase().trim(),
       password_hash: formPassword,
       role: formRole,
@@ -149,7 +149,7 @@ const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onBack }) => 
       return;
     }
 
-    const { error } = await supabase.from('users').update({
+    const { error } = await db.from('users').update({
       email: formEmail.toLowerCase().trim(),
       role: formRole,
       name: formName.trim(),
@@ -180,7 +180,7 @@ const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onBack }) => 
       return;
     }
 
-    const { error } = await supabase.from('users').update({
+    const { error } = await db.from('users').update({
       password_hash: newPassword,
     }).eq('id', selectedUser.id);
 
@@ -199,7 +199,7 @@ const StaffManagementView: React.FC<StaffManagementViewProps> = ({ onBack }) => 
   };
 
   const handleToggleActive = async (user: StaffUser) => {
-    await supabase.from('users').update({ is_active: !user.is_active }).eq('id', user.id);
+    await db.from('users').update({ is_active: !user.is_active }).eq('id', user.id);
     fetchData();
   };
 

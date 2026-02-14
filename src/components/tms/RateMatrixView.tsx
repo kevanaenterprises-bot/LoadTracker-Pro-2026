@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { RateMatrix } from '@/types/tms';
 import { ArrowLeft, DollarSign, MapPin, Plus, Search, Loader2, Edit2, Trash2, Save, X } from 'lucide-react';
 
@@ -23,7 +23,7 @@ const RateMatrixView: React.FC<RateMatrixViewProps> = ({ onBack }) => {
 
   const fetchRates = async () => {
     setLoading(true);
-    const { data } = await supabase.from('rate_matrix').select('*').order('state').order('city');
+    const { data } = await db.from('rate_matrix').select('*').order('state').order('city');
     if (data) setRates(data);
     setLoading(false);
   };
@@ -32,7 +32,7 @@ const RateMatrixView: React.FC<RateMatrixViewProps> = ({ onBack }) => {
     e.preventDefault();
     setSaving(true);
     try {
-      await supabase.from('rate_matrix').insert({
+      await db.from('rate_matrix').insert({
         city: newRate.city,
         state: newRate.state,
         base_rate: parseFloat(newRate.base_rate),
@@ -49,14 +49,14 @@ const RateMatrixView: React.FC<RateMatrixViewProps> = ({ onBack }) => {
   };
 
   const handleUpdateRate = async (id: string) => {
-    await supabase.from('rate_matrix').update({ base_rate: editRate }).eq('id', id);
+    await db.from('rate_matrix').update({ base_rate: editRate }).eq('id', id);
     setEditingId(null);
     fetchRates();
   };
 
   const handleDeleteRate = async (id: string) => {
     if (!confirm('Delete this rate?')) return;
-    await supabase.from('rate_matrix').delete().eq('id', id);
+    await db.from('rate_matrix').delete().eq('id', id);
     fetchRates();
   };
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { generateNextInvoiceNumber } from '@/lib/invoiceUtils';
 
 import { Load, LoadStop } from '@/types/tms';
@@ -121,7 +121,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
 
   const fetchLoadByToken = async (token: string) => {
     try {
-      const { data, error: fetchError } = await supabase.from('loads').select('*, driver:drivers(*)').eq('acceptance_token', token).single();
+      const { data, error: fetchError } = await db.from('loads').select('*, driver:drivers(*)').eq('acceptance_token', token).single();
       if (fetchError || !data) { setError('Load not found or link has expired'); return; }
       setLoad(data);
       setBolNumber(data.bol_number || '');
@@ -137,7 +137,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
 
   const fetchLoadStops = async (loadId: string) => {
     try {
-      const { data: stops } = await supabase
+      const { data: stops } = await db
         .from('load_stops')
         .select('*')
         .eq('load_id', loadId)
@@ -158,7 +158,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
     setShowRouteMap(false);
     setLoadStops([]);
     try {
-      const { data, error: fetchError } = await supabase
+      const { data, error: fetchError } = await db
         .from('loads')
         .select('*, driver:drivers(*)')
         .eq('load_number', loadNumberInput.trim().toUpperCase())
@@ -301,7 +301,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
       const MAX_RETRIES = 2;
       try {
         console.log(`[HERE] Fetching API key (attempt ${attempt}/${MAX_RETRIES})...`);
-        const { data, error } = await supabase.functions.invoke('here-webhook', {
+        const { data, error } = await db.functions.invoke('here-webhook', {
           body: { action: 'get-map-config' },
         });
         if (cancelled) return;
@@ -374,7 +374,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
         console.warn('[HERE] No API key available (ref is null). Trying to fetch...');
         // Try fetching one more time
         try {
-          const { data } = await supabase.functions.invoke('here-webhook', {
+          const { data } = await db.functions.invoke('here-webhook', {
             body: { action: 'get-map-config' },
           });
           if (data?.apiKey) {
@@ -567,7 +567,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
     if (!load) return;
     setAccepting(true);
     try {
-      const { error: updateError } = await supabase
+      const { error: updateError } = await db
         .from('loads')
         .update({ status: 'IN_TRANSIT', accepted_at: new Date().toISOString() })
         .eq('id', load.id);
@@ -583,16 +583,16 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
     if (!confirm('Are you sure you want to return this load? It will be sent back to dispatch for reassignment.')) return;
     setReturning(true);
     try {
-      const { error: updateError } = await supabase
+      const { error: updateError } = await db
         .from('loads')
         .update({ status: 'UNASSIGNED', driver_id: null, acceptance_token: null, accepted_at: null })
         .eq('id', load.id);
       if (updateError) { alert(`Failed to return load: ${updateError.message}`); return; }
       if (load.driver_id) {
-        await supabase.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
+        await db.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
       }
       try {
-        await supabase.functions.invoke('here-webhook', {
+        await db.functions.invoke('here-webhook', {
           body: { action: 'deactivate-load-geofences', load_id: load.id },
         });
       } catch { /* non-critical */ }
@@ -646,7 +646,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
       console.log('[Route] Sending stops to calculate-truck-route:', JSON.stringify(stopsPayload));
 
       // PRIMARY: Use calculate-truck-route (no DB needed in edge function)
-      const { data, error } = await supabase.functions.invoke('here-webhook', {
+      const { data, error } = await db.functions.invoke('here-webhook', {
         body: { action: 'calculate-truck-route', stops: stopsPayload },
       });
 
@@ -660,7 +660,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
       } else {
         console.warn('[Route] calculate-truck-route failed:', data?.error, '- trying get-route-for-load fallback');
         // FALLBACK: Try the old DB-dependent action
-        const { data: data2 } = await supabase.functions.invoke('here-webhook', {
+        const { data: data2 } = await db.functions.invoke('here-webhook', {
           body: { action: 'get-route-for-load', load_id: load.id },
         });
         if (data2?.success) {
@@ -733,7 +733,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
         updatePayload.battery_level = batteryLevel;
       }
 
-      const { error: dbError } = await supabase
+      const { error: dbError } = await db
         .from('drivers')
         .update(updatePayload)
         .eq('id', load.driver_id);
@@ -749,7 +749,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
         // Verify the write by reading back (only occasionally to save bandwidth)
         if (gpsUpdateCount % 5 === 0) {
           try {
-            const { data: verify } = await supabase
+            const { data: verify } = await db
               .from('drivers')
               .select('last_known_lat, last_known_lng')
               .eq('id', load.driver_id)
@@ -774,7 +774,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
       // (geofence checks, position history logging, etc.)
       // This is non-blocking - we don't await it or care if it fails
       // ============================================================
-      supabase.functions.invoke('here-webhook', {
+      db.functions.invoke('here-webhook', {
         body: {
           action: 'update-driver-location',
           driver_id: load.driver_id,
@@ -1085,7 +1085,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
     try {
       // Save BOL number first
       setUploadProgress('Saving BOL number...');
-      const { error: bolError } = await supabase
+      const { error: bolError } = await db
         .from('loads')
         .update({ bol_number: bolNumber.trim().toUpperCase() })
         .eq('id', load.id);
@@ -1111,7 +1111,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
           setUploadProgress(`Uploading ${file.name} to server...`);
 
           // Upload via edge function (uses service role key - bypasses storage policies)
-          const { data: uploadResult, error: uploadError } = await supabase.functions.invoke('upload-pod-file', {
+          const { data: uploadResult, error: uploadError } = await db.functions.invoke('upload-pod-file', {
             body: {
               load_id: load.id,
               file_name: file.name,
@@ -1159,11 +1159,11 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
 
       // Mark load as delivered
       setUploadProgress('Marking load as delivered...');
-      await supabase.from('loads').update({ status: 'DELIVERED', delivered_at: new Date().toISOString() }).eq('id', load.id);
+      await db.from('loads').update({ status: 'DELIVERED', delivered_at: new Date().toISOString() }).eq('id', load.id);
 
       let autoInvoice = false;
       try {
-        const { data: settingData } = await supabase.from('settings').select('value').eq('key', 'auto_invoice_enabled').single();
+        const { data: settingData } = await db.from('settings').select('value').eq('key', 'auto_invoice_enabled').single();
         autoInvoice = settingData?.value === 'true';
       } catch { /* default false */ }
 
@@ -1178,14 +1178,14 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
         // Check for fuel surcharge
         try {
           if (load.customer_id) {
-            const { data: customerData } = await supabase
+            const { data: customerData } = await db
               .from('customers')
               .select('has_fuel_surcharge')
               .eq('id', load.customer_id)
               .single();
             
             if (customerData?.has_fuel_surcharge && load.total_miles) {
-              const { data: fuelSetting } = await supabase
+              const { data: fuelSetting } = await db
                 .from('settings')
                 .select('value')
                 .eq('key', 'fuel_surcharge_rate')
@@ -1201,8 +1201,8 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
           }
         } catch { /* fuel surcharge calculation is non-critical */ }
 
-        await supabase.from('invoices').insert({ invoice_number: invoiceNumber, load_id: load.id, amount: totalAmount, status: 'PENDING' });
-        await supabase.from('loads').update({ status: 'INVOICED' }).eq('id', load.id);
+        await db.from('invoices').insert({ invoice_number: invoiceNumber, load_id: load.id, amount: totalAmount, status: 'PENDING' });
+        await db.from('loads').update({ status: 'INVOICED' }).eq('id', load.id);
         finalStatus = 'INVOICED';
 
         // ─── AUTO-EMAIL: Send invoice email to customer + confirmation to owner ───
@@ -1210,7 +1210,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
         setInvoiceEmailStatus('sending');
         try {
           console.log(`[Auto-Invoice] Sending invoice ${invoiceNumber} email for load ${load.id}...`);
-          const { data: emailResult, error: emailError } = await supabase.functions.invoke('send-invoice-email', {
+          const { data: emailResult, error: emailError } = await db.functions.invoke('send-invoice-email', {
             body: { load_id: load.id, auto_triggered: true },
           });
 
@@ -1235,11 +1235,11 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
       }
 
       if (load.driver_id) {
-        await supabase.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
+        await db.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
       }
 
       try {
-        await supabase.functions.invoke('here-webhook', {
+        await db.functions.invoke('here-webhook', {
           body: { action: 'deactivate-load-geofences', load_id: load.id },
         });
       } catch { /* non-critical */ }

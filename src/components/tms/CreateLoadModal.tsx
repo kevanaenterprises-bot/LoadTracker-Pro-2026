@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, MapPin, Calendar, Package, DollarSign, Loader2, Hash, Building2, ChevronDown, Plus, Trash2, Truck, AlertTriangle, Lock, ShieldAlert, FileText, Upload, CheckCircle2, AlertCircle } from 'lucide-react';
-import { supabase, supabaseUrl, supabaseKey } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { Customer, Location } from '@/types/tms';
 import { extractTextFromImage, parseRateConfirmation, saveOcrTrainingData, ParsedRateConData } from '@/lib/ocrService';
 
@@ -119,12 +119,12 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
   }, [deliveryStops, receivers]);
 
   const fetchCustomers = async () => {
-    const { data } = await supabase.from('customers').select('*').order('company_name');
+    const { data } = await db.from('customers').select('*').order('company_name');
     if (data) setCustomers(data);
   };
 
   const fetchLocations = async () => {
-    const { data } = await supabase.from('locations').select('*').order('company_name');
+    const { data } = await db.from('locations').select('*').order('company_name');
     if (data) {
       setShippers(data.filter(l => l.location_type === 'shipper'));
       setReceivers(data.filter(l => l.location_type === 'receiver'));
@@ -330,7 +330,7 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
   const insertLoad = async () => {
     const payload = buildLoadPayload();
 
-    const { data: loadData, error: loadError } = await supabase.from('loads').insert(payload).select().single();
+    const { data: loadData, error: loadError } = await db.from('loads').insert(payload).select().single();
     if (loadError) throw loadError;
 
     // Insert all stops
@@ -365,11 +365,11 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
       })),
     ];
 
-    await supabase.from('load_stops').insert(stopsToInsert);
+    await db.from('load_stops').insert(stopsToInsert);
 
     // Auto-setup geofences (fire-and-forget)
     if (loadData?.id) {
-      supabase.functions.invoke('here-webhook', {
+      db.functions.invoke('here-webhook', {
         body: { action: 'auto-setup-geofences', load_id: loadData.id },
       }).then(({ data: geoData }) => {
         if (geoData?.success) {
@@ -383,29 +383,18 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
     return loadData;
   };
 
-  /** Delete a load and all its related records using direct REST API calls */
+  /** Delete a load and all its related records */
   const deleteLoadDirect = async (loadId: string, driverId?: string | null) => {
-    const headers = {
-      'apikey': supabaseKey,
-      'Authorization': `Bearer ${supabaseKey}`,
-    };
-
-    // Delete related records first (same pattern as handleDeleteLoad in AppLayout)
-    await fetch(`${supabaseUrl}/rest/v1/payments?load_id=eq.${loadId}`, { method: 'DELETE', headers });
-    await fetch(`${supabaseUrl}/rest/v1/load_stops?load_id=eq.${loadId}`, { method: 'DELETE', headers });
-    await fetch(`${supabaseUrl}/rest/v1/pod_documents?load_id=eq.${loadId}`, { method: 'DELETE', headers });
-    await fetch(`${supabaseUrl}/rest/v1/invoices?load_id=eq.${loadId}`, { method: 'DELETE', headers });
-
-    const loadResponse = await fetch(`${supabaseUrl}/rest/v1/loads?id=eq.${loadId}`, { method: 'DELETE', headers });
-
-    if (!loadResponse.ok) {
-      const errorText = await loadResponse.text();
-      throw new Error(`Failed to delete existing load: ${errorText}`);
-    }
+    // Delete related records first (foreign key constraints require this order)
+    await db.from('payments').delete().eq('load_id', loadId);
+    await db.from('load_stops').delete().eq('load_id', loadId);
+    await db.from('pod_documents').delete().eq('load_id', loadId);
+    await db.from('invoices').delete().eq('load_id', loadId);
+    await db.from('loads').delete().eq('id', loadId);
 
     // Release the driver if one was assigned
     if (driverId) {
-      await supabase.from('drivers').update({ status: 'available' }).eq('id', driverId);
+      await db.from('drivers').update({ status: 'available' }).eq('id', driverId);
     }
   };
 
@@ -441,7 +430,7 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
       // Wrapped in its own try/catch so query failures don't prevent the insert attempt
       let existingLoadId: string | null = null;
       try {
-        const { data: existing, error: checkError } = await supabase
+        const { data: existing, error: checkError } = await db
           .from('loads')
           .select('id, driver_id')
           .eq('load_number', trimmedLoadNumber)
@@ -524,7 +513,7 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
       if (isDuplicate) {
         // Look up the existing load id for override
         try {
-          const { data: existing } = await supabase
+          const { data: existing } = await db
             .from('loads')
             .select('id')
             .eq('load_number', formData.load_number.trim())
@@ -569,7 +558,7 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
       // Get the existing load's driver_id so we can release them
       let existingDriverId: string | null = null;
       try {
-        const { data: existingLoad } = await supabase
+        const { data: existingLoad } = await db
           .from('loads')
           .select('driver_id')
           .eq('id', duplicateLoadId)

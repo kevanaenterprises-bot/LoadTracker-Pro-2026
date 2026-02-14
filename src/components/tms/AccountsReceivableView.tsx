@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { Load, Invoice, Payment, Customer, PODDocument } from '@/types/tms';
 import {
   ArrowLeft, DollarSign, Search, Loader2, Clock, AlertTriangle,
@@ -69,7 +69,7 @@ const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack,
     setLoading(true);
 
     // Fetch all invoices that are PENDING (not fully paid)
-    const { data: invoices } = await supabase
+    const { data: invoices } = await db
       .from('invoices')
       .select('*')
       .eq('status', 'PENDING')
@@ -83,21 +83,21 @@ const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack,
 
     // Fetch associated loads with customer data
     const loadIds = invoices.map(inv => inv.load_id);
-    const { data: loads } = await supabase
+    const { data: loads } = await db
       .from('loads')
       .select('*, customer:customers(*), driver:drivers(*)')
       .in('id', loadIds);
 
     // Fetch all payments for these invoices
     const invoiceIds = invoices.map(inv => inv.id);
-    const { data: payments } = await supabase
+    const { data: payments } = await db
       .from('payments')
       .select('*')
       .in('invoice_id', invoiceIds)
       .order('payment_date', { ascending: true });
 
     // Fetch all POD documents for these loads
-    const { data: allPodDocs } = await supabase
+    const { data: allPodDocs } = await db
       .from('pod_documents')
       .select('*')
       .in('load_id', loadIds);
@@ -263,19 +263,19 @@ const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack,
           const urlParts = doc.file_url.split('/pod-documents/');
           if (urlParts.length > 1) {
             const storagePath = decodeURIComponent(urlParts[1]);
-            await supabase.storage.from('pod-documents').remove([storagePath]);
+            await db.storage.from('pod-documents').remove([storagePath]);
           }
         } catch { /* Storage file may not exist */ }
 
-        const { error } = await supabase.from('pod_documents').delete().eq('id', doc.id);
+        const { error } = await db.from('pod_documents').delete().eq('id', doc.id);
         if (!error) deletedCount++;
       }
 
       // Delete the invoice
-      await supabase.from('invoices').delete().eq('id', item.invoice.id);
+      await db.from('invoices').delete().eq('id', item.invoice.id);
 
       // Reset load to IN_TRANSIT
-      await supabase
+      await db
         .from('loads')
         .update({ status: 'IN_TRANSIT', delivered_at: null })
         .eq('id', item.load.id);

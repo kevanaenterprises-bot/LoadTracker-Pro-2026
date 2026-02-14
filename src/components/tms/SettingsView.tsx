@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/supabaseCompat';
 import { 
   ArrowLeft, Settings, Phone, CheckCircle, 
   AlertCircle, MessageSquare, TestTube, Loader2, Info,
@@ -43,7 +43,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   const [sendingTestEmail, setSendingTestEmail] = useState(false);
   const [testEmailResult, setTestEmailResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  const webhookUrl = `${window.location.origin.includes('localhost') ? 'https://tlksfrowyjprvjerydrp.supabase.co' : ''}/functions/v1/here-webhook`;
+  const webhookUrl = `${window.location.origin.includes('localhost') ? 'https://tlksfrowyjprvjerydrp.db.co' : ''}/functions/v1/here-webhook`;
 
   useEffect(() => {
     fetchGeofenceStats();
@@ -52,7 +52,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
 
   const fetchSettings = async () => {
     try {
-      const { data } = await supabase
+      const { data } = await db
         .from('settings')
         .select('key, value')
         .in('key', ['auto_invoice_enabled', 'invoice_notification_email', 'resend_from_email']);
@@ -74,7 +74,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     setAutoInvoiceEnabled(newValue);
     
     try {
-      await supabase
+      await db
         .from('settings')
         .upsert({ key: 'auto_invoice_enabled', value: newValue.toString() }, { onConflict: 'key' });
     } catch (err) {
@@ -87,7 +87,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     setSavingSettings(true);
     setSettingsSaved(false);
     try {
-      await supabase
+      await db
         .from('settings')
         .upsert({ key: 'invoice_notification_email', value: invoiceNotificationEmail.trim() }, { onConflict: 'key' });
       setSettingsSaved(true);
@@ -104,7 +104,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     setSavingFromEmail(true);
     setFromEmailSaved(false);
     try {
-      await supabase
+      await db
         .from('settings')
         .upsert({ key: 'resend_from_email', value: resendFromEmail.trim() }, { onConflict: 'key' });
       setFromEmailSaved(true);
@@ -126,7 +126,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     setTestEmailResult(null);
 
     try {
-      const { data, error } = await supabase.functions.invoke('send-invoice-email', {
+      const { data, error } = await db.functions.invoke('send-invoice-email', {
         body: { load_id: '__test__', test_email: testEmailAddress },
       });
 
@@ -156,11 +156,11 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   const fetchGeofenceStats = async () => {
     setLoadingStats(true);
     try {
-      const { count: totalGf } = await supabase.from('here_geofences').select('*', { count: 'exact', head: true });
-      const { count: activeGf } = await supabase.from('here_geofences').select('*', { count: 'exact', head: true }).eq('status', 'active');
-      const { count: totalDevices } = await supabase.from('here_devices').select('*', { count: 'exact', head: true }).eq('status', 'active');
-      const { count: totalEvents } = await supabase.from('here_webhook_events').select('*', { count: 'exact', head: true });
-      const { count: processedEvents } = await supabase.from('here_webhook_events').select('*', { count: 'exact', head: true }).eq('processed', true);
+      const { count: totalGf } = await db.from('here_geofences').select('*', { count: 'exact', head: true });
+      const { count: activeGf } = await db.from('here_geofences').select('*', { count: 'exact', head: true }).eq('status', 'active');
+      const { count: totalDevices } = await db.from('here_devices').select('*', { count: 'exact', head: true }).eq('status', 'active');
+      const { count: totalEvents } = await db.from('here_webhook_events').select('*', { count: 'exact', head: true });
+      const { count: processedEvents } = await db.from('here_webhook_events').select('*', { count: 'exact', head: true }).eq('processed', true);
 
       setGeofenceStats({
         total_geofences: totalGf || 0,
@@ -181,7 +181,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     setSendingTest(true);
     setTestResult(null);
     try {
-      const { data, error } = await supabase.functions.invoke('send-driver-sms', {
+      const { data, error } = await db.functions.invoke('send-driver-sms', {
         body: {
           driverPhone: testPhone, driverName: 'Test Driver', loadNumber: 'TEST-001',
           origin: 'Test Origin, TX', destination: 'Test Destination, CA',
