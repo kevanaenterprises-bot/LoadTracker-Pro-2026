@@ -370,8 +370,6 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key);
-
 -- Insert default admin user
 -- Password is stored as plaintext 'admin123' in password_hash column (matching existing Supabase implementation)
 INSERT INTO users (email, password_hash, name, role, is_active)

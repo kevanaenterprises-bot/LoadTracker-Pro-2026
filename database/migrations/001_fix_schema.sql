@@ -31,19 +31,5 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Create index on key if it doesn't exist
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_indexes 
-    WHERE indexname = 'idx_settings_key'
-  ) THEN
-    CREATE INDEX idx_settings_key ON settings(key);
-    RAISE NOTICE 'Created index idx_settings_key';
-  ELSE
-    RAISE NOTICE 'Index idx_settings_key already exists';
-  END IF;
-END $$;
-
 -- Add comment for settings table
 COMMENT ON TABLE settings IS 'Application settings (key-value pairs)';
