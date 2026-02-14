@@ -350,7 +350,7 @@ CREATE TABLE IF NOT EXISTS usage_tracking (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
   feature VARCHAR(100) NOT NULL,
-  month_year VARCHAR(7) NOT NULL,
+  month_year VARCHAR(7) NOT NULL CHECK (month_year ~ '^\d{4}-\d{2}$'),  -- Format: YYYY-MM
   count INTEGER DEFAULT 0,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

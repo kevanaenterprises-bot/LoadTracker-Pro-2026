@@ -45,6 +45,12 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
   }
 
   select(columns: string = '*'): QueryBuilder {
+    // Validate column names to prevent SQL injection
+    // Allow: column names, *, commas, spaces, and basic SQL functions like COUNT(), SUM(), etc.
+    const validSelectPattern = /^[a-zA-Z0-9_.*,\s()]+$/;
+    if (!validSelectPattern.test(columns)) {
+      throw new Error('Invalid column specification');
+    }
     this.selectColumns = columns;
     this.selectCalled = true;
     if (this.operation !== 'insert' && this.operation !== 'update' && this.operation !== 'delete') {
@@ -201,6 +207,12 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
         
         // Add ON CONFLICT clause
         if (this.upsertConflict) {
+          // Validate conflict columns to prevent SQL injection
+          const conflictColumns = this.upsertConflict.split(',').map(col => col.trim());
+          const validColumnPattern = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+          if (!conflictColumns.every(col => validColumnPattern.test(col))) {
+            throw new Error('Invalid conflict column names');
+          }
           sql += ` ON CONFLICT (${this.upsertConflict}) DO UPDATE SET `;
           const updateClauses = keys.map(key => `${key} = EXCLUDED.${key}`).join(', ');
           sql += updateClauses;
