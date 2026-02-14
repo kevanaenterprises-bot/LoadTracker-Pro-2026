@@ -77,6 +77,19 @@ app.post('/api/query', async (req, res) => {
 });
 
 // Start server
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Serve static files from React build
+app.use(express.static(join(__dirname, '../dist')));
+
+// Catch-all handler - send React app for any non-API routes
+app.get('*', (req, res) => {
+  res.sendFile(join(__dirname, '../dist/index.html'));
+});
 app.listen(PORT, () => {
   console.log(`🚀 API server running on port ${PORT}`);
   console.log(`📊 Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`);
