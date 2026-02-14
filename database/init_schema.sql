@@ -362,6 +362,16 @@ CREATE INDEX IF NOT EXISTS idx_usage_tracking_user_id ON usage_tracking(user_id)
 CREATE INDEX IF NOT EXISTS idx_usage_tracking_feature ON usage_tracking(feature);
 CREATE INDEX IF NOT EXISTS idx_usage_tracking_month_year ON usage_tracking(month_year);
 
+-- Settings table (key-value configuration)
+CREATE TABLE IF NOT EXISTS settings (
+  key VARCHAR(100) PRIMARY KEY,
+  value TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key);
+
 -- Insert default admin user
 -- Password is stored as plaintext 'admin123' in password_hash column (matching existing Supabase implementation)
 INSERT INTO users (email, password_hash, name, role, is_active)
@@ -388,3 +398,4 @@ COMMENT ON TABLE driver_files IS 'Driver document management';
 COMMENT ON TABLE ocr_training_data IS 'OCR extraction results and corrections for training';
 COMMENT ON TABLE demo_visitors IS 'Demo mode visitor tracking';
 COMMENT ON TABLE usage_tracking IS 'Application usage analytics';
+COMMENT ON TABLE settings IS 'Application settings (key-value pairs)';
