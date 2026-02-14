@@ -31,7 +31,7 @@ import {
   Truck, Plus, Package, Clock, DollarSign, Fuel,
   FileText, Users, TrendingUp, RefreshCw, Menu, X,
   LayoutDashboard, Archive, Settings, Building2, MapPin, LogOut, Radar, Receipt, ShieldCheck,
-  Crown, Brain, Zap, MessageSquare, ChevronDown, ChevronRight, Send, CheckCircle2
+  Crown, Brain, Zap, MessageSquare, ChevronDown, ChevronRight, Send, CheckCircle2, AlertCircle
 } from 'lucide-react';
 
 
@@ -57,6 +57,7 @@ const AppLayout: React.FC = () => {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -218,32 +219,53 @@ const AppLayout: React.FC = () => {
 
   const fetchData = async () => {
     setLoading(true);
+    setError(null);
     
-    const { data: loadsData } = await db
-      .from('loads')
-      .select('*, customer:customers(*), driver:drivers(*)')
-      .neq('status', 'PAID')
-      .order('delivery_date', { ascending: true });
-    
-    const { data: driversData } = await db
-      .from('drivers')
-      .select('*')
-      .order('name');
+    try {
+      console.log('[AppLayout] Fetching loads and drivers...');
+      
+      const { data: loadsData, error: loadsError } = await db
+        .from('loads')
+        .select('*, customer:customers(*), driver:drivers(*)')
+        .neq('status', 'PAID')
+        .order('delivery_date', { ascending: true });
+      
+      if (loadsError) {
+        console.error('[AppLayout] Error fetching loads:', loadsError);
+        throw loadsError;
+      }
+      
+      const { data: driversData, error: driversError } = await db
+        .from('drivers')
+        .select('*')
+        .order('name');
+        
+      if (driversError) {
+        console.error('[AppLayout] Error fetching drivers:', driversError);
+        throw driversError;
+      }
 
-    if (loadsData) {
-      setLoads(loadsData);
-      // Fetch payment data for invoiced loads
-      fetchPaymentData(loadsData);
-    }
-    if (driversData) setDrivers(driversData);
-    setLoading(false);
+      console.log(`[AppLayout] Fetched ${loadsData?.length || 0} loads and ${driversData?.length || 0} drivers`);
 
-    if (loadsData && driversData) {
-      cleanupStaleDriverStatuses(loadsData, driversData).then(() => {
-        db.from('drivers').select('*').order('name').then(({ data }) => {
-          if (data) setDrivers(data);
+      if (loadsData) {
+        setLoads(loadsData);
+        // Fetch payment data for invoiced loads
+        fetchPaymentData(loadsData);
+      }
+      if (driversData) setDrivers(driversData);
+
+      if (loadsData && driversData) {
+        cleanupStaleDriverStatuses(loadsData, driversData).then(() => {
+          db.from('drivers').select('*').order('name').then(({ data }) => {
+            if (data) setDrivers(data);
+          });
         });
-      });
+      }
+    } catch (err: any) {
+      console.error('[AppLayout] Failed to fetch data:', err);
+      setError(err?.message || 'Failed to load data. Please try refreshing.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -771,6 +793,19 @@ const AppLayout: React.FC = () => {
               <div className="flex flex-col items-center gap-4">
                 <RefreshCw className="w-8 h-8 animate-spin text-blue-600" />
                 <p className="text-slate-500">Loading loads...</p>
+              </div>
+            </div>
+          ) : error ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="flex flex-col items-center gap-4">
+                <AlertCircle className="w-12 h-12 text-red-500" />
+                <p className="text-red-600 font-medium">{error}</p>
+                <button 
+                  onClick={handleRefresh}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Try Again
+                </button>
               </div>
             </div>
           ) : loads.length === 0 ? (
