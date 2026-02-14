@@ -5,8 +5,9 @@ import { query } from './database';
  */
 
 export interface QueryBuilder {
-  select(columns: string): QueryBuilder;
-  insert(data: any): Promise<{ data: any; error: any }>;
+  select(columns?: string): QueryBuilder;
+  insert(data: any): QueryBuilder;
+  upsert(data: any, options?: { onConflict?: string }): QueryBuilder;
   update(data: any): QueryBuilder;
   delete(): QueryBuilder;
   eq(column: string, value: any): QueryBuilder;
@@ -31,9 +32,11 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
   private whereConditions: Array<{ column: string; operator: string; value: any }> = [];
   private orderByClause: string = '';
   private limitClause: string = '';
-  private operation: 'select' | 'insert' | 'update' | 'delete' = 'select';
+  private operation: 'select' | 'insert' | 'update' | 'delete' | 'upsert' = 'select';
   private updateData: any = null;
   private insertData: any = null;
+  private upsertData: any = null;
+  private upsertConflict: string = '';
   private singleResult: boolean = false;
 
   constructor(table: string) {
@@ -42,27 +45,23 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
 
   select(columns: string = '*'): QueryBuilder {
     this.selectColumns = columns;
-    this.operation = 'select';
+    if (this.operation !== 'insert' && this.operation !== 'update' && this.operation !== 'delete') {
+      this.operation = 'select';
+    }
     return this;
   }
 
-  async insert(data: any): Promise<{ data: any; error: any }> {
-    try {
-      const keys = Object.keys(data);
-      const values = Object.values(data);
-      const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
-      
-      const sql = `
-        INSERT INTO ${this.table} (${keys.join(', ')})
-        VALUES (${placeholders})
-        RETURNING *
-      `;
-      
-      const result = await query(sql, values);
-      return { data: result.rows[0], error: null };
-    } catch (error: any) {
-      return { data: null, error };
-    }
+  insert(data: any): QueryBuilder {
+    this.operation = 'insert';
+    this.insertData = data;
+    return this;
+  }
+
+  upsert(data: any, options?: { onConflict?: string }): QueryBuilder {
+    this.operation = 'upsert';
+    this.upsertData = data;
+    this.upsertConflict = options?.onConflict || '';
+    return this;
   }
 
   update(data: any): QueryBuilder {
@@ -176,6 +175,36 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
         }
         
         sql += this.orderByClause + this.limitClause;
+        
+      } else if (this.operation === 'insert') {
+        const keys = Object.keys(this.insertData);
+        const values = Object.values(this.insertData);
+        const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+        
+        sql = `INSERT INTO ${this.table} (${keys.join(', ')}) VALUES (${placeholders})`;
+        params.push(...values);
+        
+        // Add RETURNING clause if select was called
+        if (this.selectColumns) {
+          sql += ` RETURNING ${this.selectColumns}`;
+        }
+        
+      } else if (this.operation === 'upsert') {
+        const keys = Object.keys(this.upsertData);
+        const values = Object.values(this.upsertData);
+        const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+        
+        sql = `INSERT INTO ${this.table} (${keys.join(', ')}) VALUES (${placeholders})`;
+        params.push(...values);
+        
+        // Add ON CONFLICT clause
+        if (this.upsertConflict) {
+          sql += ` ON CONFLICT (${this.upsertConflict}) DO UPDATE SET `;
+          const updateClauses = keys.map(key => `${key} = EXCLUDED.${key}`).join(', ');
+          sql += updateClauses;
+        }
+        
+        sql += ' RETURNING *';
         
       } else if (this.operation === 'update') {
         const keys = Object.keys(this.updateData);

@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
   name VARCHAR(255) NOT NULL,
   role VARCHAR(50) NOT NULL CHECK (role IN ('admin', 'driver')),
   driver_id UUID,
+  subscription_tier VARCHAR(50) DEFAULT 'free' CHECK (subscription_tier IN ('free', 'standard')),
   is_active BOOLEAN DEFAULT true,
   last_login TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -348,16 +349,17 @@ CREATE INDEX IF NOT EXISTS idx_demo_visitors_visitor_id ON demo_visitors(visitor
 CREATE TABLE IF NOT EXISTS usage_tracking (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-  action VARCHAR(100) NOT NULL,
-  resource_type VARCHAR(100),
-  resource_id UUID,
-  metadata JSONB,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  feature VARCHAR(100) NOT NULL,
+  month_year VARCHAR(7) NOT NULL,
+  count INTEGER DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(user_id, feature, month_year)
 );
 
 CREATE INDEX IF NOT EXISTS idx_usage_tracking_user_id ON usage_tracking(user_id);
-CREATE INDEX IF NOT EXISTS idx_usage_tracking_action ON usage_tracking(action);
-CREATE INDEX IF NOT EXISTS idx_usage_tracking_created_at ON usage_tracking(created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_tracking_feature ON usage_tracking(feature);
+CREATE INDEX IF NOT EXISTS idx_usage_tracking_month_year ON usage_tracking(month_year);
 
 -- Insert default admin user
 -- Password is stored as plaintext 'admin123' in password_hash column (matching existing Supabase implementation)
