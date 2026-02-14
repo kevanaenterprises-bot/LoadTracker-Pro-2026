@@ -106,7 +106,13 @@ app.post('/api/geocode', async (req, res) => {
       return res.status(404).json({ error: 'Location not found' });
     }
 
-    res.json(result);
+    // Return with success flag for compatibility
+    res.json({
+      success: true,
+      latitude: result.latitude,
+      longitude: result.longitude,
+      formattedAddress: result.formattedAddress,
+    });
   } catch (error) {
     console.error('Geocode error:', error);
     res.status(500).json({ error: error.message || 'Geocoding failed' });
