@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 const { Pool } = pg;
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3001;
 
 // Rate limiting configuration
