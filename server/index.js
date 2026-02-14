@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
 import rateLimit from 'express-rate-limit';
+import hereApi from './hereApi.js';
 
 const { Pool } = pg;
 
@@ -73,6 +74,132 @@ app.post('/api/query', async (req, res) => {
   } catch (error) {
     console.error('Query error:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// HERE Maps API Endpoints
+
+// Get HERE API configuration (returns API key for frontend maps)
+// NOTE: This exposes the HERE API key to the frontend, which is necessary for client-side
+// map rendering. Consider implementing server-side proxying for sensitive operations or
+// using HERE's API key restrictions (domain allowlist, rate limits) to prevent abuse.
+app.get('/api/here-config', (req, res) => {
+  const apiKey = process.env.HERE_API_KEY;
+  if (!apiKey) {
+    return res.status(503).json({ 
+      error: 'HERE_API_KEY not configured',
+      message: 'HERE Maps API key is not set in environment variables' 
+    });
+  }
+  res.json({ apiKey });
+});
+
+// Geocode an address
+app.post('/api/geocode', async (req, res) => {
+  try {
+    const { address, city, state, zip } = req.body;
+    
+    if (!address && !city) {
+      return res.status(400).json({ error: 'At least address or city is required' });
+    }
+
+    const result = await hereApi.geocodeAddress(address, city, state, zip);
+    
+    if (!result) {
+      return res.status(404).json({ error: 'Location not found' });
+    }
+
+    // Return with success flag for compatibility
+    res.json({
+      success: true,
+      latitude: result.latitude,
+      longitude: result.longitude,
+      formattedAddress: result.formattedAddress,
+    });
+  } catch (error) {
+    console.error('Geocode error:', error);
+    res.status(500).json({ error: error.message || 'Geocoding failed' });
+  }
+});
+
+// Geocode an address and save to database
+app.post('/api/geocode-and-save', async (req, res) => {
+  try {
+    const { location_id, address, city, state, zip, geofence_radius } = req.body;
+    
+    if (!location_id) {
+      return res.status(400).json({ error: 'location_id is required' });
+    }
+
+    if (!address && !city) {
+      return res.status(400).json({ error: 'At least address or city is required' });
+    }
+
+    const result = await hereApi.geocodeAndSaveLocation(
+      pool, 
+      location_id, 
+      address, 
+      city, 
+      state, 
+      zip, 
+      geofence_radius || 500
+    );
+
+    res.json(result);
+  } catch (error) {
+    console.error('Geocode and save error:', error);
+    res.status(500).json({ error: error.message || 'Geocoding failed' });
+  }
+});
+
+// Reverse geocode coordinates
+app.post('/api/reverse-geocode', async (req, res) => {
+  try {
+    const { latitude, longitude } = req.body;
+    
+    if (!latitude || !longitude) {
+      return res.status(400).json({ error: 'latitude and longitude are required' });
+    }
+
+    const result = await hereApi.reverseGeocode(latitude, longitude);
+    
+    if (!result) {
+      return res.status(404).json({ error: 'Address not found for coordinates' });
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('Reverse geocode error:', error);
+    res.status(500).json({ error: error.message || 'Reverse geocoding failed' });
+  }
+});
+
+// Calculate truck route
+app.post('/api/calculate-route', async (req, res) => {
+  try {
+    const { waypoints } = req.body;
+    
+    if (!waypoints || !Array.isArray(waypoints) || waypoints.length < 2) {
+      return res.status(400).json({ error: 'At least 2 waypoints are required' });
+    }
+
+    // Validate waypoint format
+    for (const waypoint of waypoints) {
+      if (!waypoint.lat || !waypoint.lng) {
+        return res.status(400).json({ error: 'Each waypoint must have lat and lng properties' });
+      }
+    }
+
+    const result = await hereApi.calculateTruckRoute(waypoints);
+    
+    if (!result) {
+      return res.status(404).json({ error: 'No route found' });
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('Calculate route error:', error);
+    res.status(500).json({ error: error.message || 'Route calculation failed' });
   }
 });
 
