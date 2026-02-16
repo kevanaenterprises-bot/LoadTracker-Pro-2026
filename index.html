@@ -1,0 +1,108 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LoadTracker Pro - TMS</title>
+    <meta name="description" content="LoadTracker Pro - Transportation Management System for freight dispatch, driver management, and load tracking." />
+    <link rel="icon" type="image/svg+xml" href="/placeholder.svg" />
+
+    <meta property="og:title" content="LoadTracker Pro - TMS" />
+    <meta property="og:description" content="Transportation Management System for freight dispatch, driver management, and load tracking." />
+    <meta property="og:type" content="website" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <script type="text/javascript">
+      // ================================================================
+      // SPA REDIRECT HANDLER - Runs BEFORE React mounts
+      // ================================================================
+      // This handles redirects from:
+      //   1. public/404.html → /?_dp=/driver-portal?token=xxx
+      //   2. public/driver-portal/index.html → /?_dp=/driver-portal?token=xxx
+      //   3. Legacy sessionStorage approach (fallback)
+      //
+      // It uses history.replaceState to set the correct URL so React Router
+      // sees the intended path when it initializes.
+      //
+      // CRITICAL: If _dp contains a driver URL, we MUST replaceState to it.
+      // If replaceState fails for any reason, the React-level TokenRedirectGuard
+      // in App.tsx will catch it as a final safety net.
+      // ================================================================
+
+      (function() {
+        try {
+          var params = new URLSearchParams(window.location.search);
+
+          // Priority 1: ?_dp= parameter (from 404.html or driver-portal/index.html)
+          var dp = params.get('_dp');
+          if (dp) {
+            // Decode and navigate to the intended path
+            var targetPath = decodeURIComponent(dp);
+            // Validate: must start with /
+            if (targetPath.charAt(0) === '/') {
+              window.history.replaceState(null, '', targetPath);
+              return; // Done - React Router will see the correct path
+            }
+          }
+
+          // Priority 2: sessionStorage redirect (legacy fallback)
+          var spaRedirect = sessionStorage.getItem('spa_redirect');
+          if (spaRedirect) {
+            sessionStorage.removeItem('spa_redirect');
+            if (window.location.pathname === '/' && spaRedirect.charAt(0) === '/') {
+              window.history.replaceState(null, '', spaRedirect);
+              return;
+            }
+          }
+
+          // Priority 3: GitHub Pages 404.html redirect (/?/path format)
+          if (window.location.search[1] === '/') {
+            var decoded = window.location.search.slice(1).split('&').map(function(s) {
+              return s.replace(/~and~/g, '&');
+            }).join('?');
+            window.history.replaceState(null, '',
+              window.location.pathname.slice(0, -1) + decoded + window.location.hash
+            );
+          }
+        } catch (e) {
+          // If anything fails, React-level guards will handle it
+          console.error('SPA redirect handler error:', e);
+        }
+      })();
+    </script>
+  </head>
+
+  <body>
+    <div id="root">
+      <!-- Loading indicator shown while React loads - prevents blank white page -->
+      <div id="app-loading" style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#f1f5f9,#e2e8f0);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+        <div style="text-align:center">
+          <div style="width:40px;height:40px;border:4px solid #e2e8f0;border-top-color:#3b82f6;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 16px"></div>
+          <p style="color:#64748b;font-size:14px">Loading...</p>
+        </div>
+      </div>
+      <style>#app-loading{transition:opacity .3s}@keyframes spin{to{transform:rotate(360deg)}}</style>
+    </div>
+    <script>
+      // Global error handler to prevent blank white page
+      window.addEventListener('error', function(e) {
+        console.error('Global error:', e.error || e.message);
+        var root = document.getElementById('root');
+        var loading = document.getElementById('app-loading');
+        // If React hasn't mounted yet (loading indicator still visible), show error
+        if (loading && root && root.children.length <= 2) {
+          loading.innerHTML = '<div style="text-align:center;padding:24px;max-width:400px">' +
+            '<p style="font-size:18px;font-weight:700;color:#1e293b;margin:0 0 8px">Something went wrong</p>' +
+            '<p style="font-size:14px;color:#64748b;margin:0 0 16px">The app failed to load. Please try reloading.</p>' +
+            '<button onclick="location.reload()" style="padding:12px 24px;background:#3b82f6;color:white;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer">Reload Page</button>' +
+            '<p style="font-size:11px;color:#94a3b8;margin:16px 0 0;font-family:monospace;word-break:break-all">' + (e.message || 'Unknown error') + '</p>' +
+            '</div>';
+        }
+      });
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+
+</html>
