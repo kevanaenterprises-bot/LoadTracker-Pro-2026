@@ -76,6 +76,7 @@ const AppLayout: React.FC = () => {
 
   const [paymentData, setPaymentData] = useState<Record<string, PaymentInfo>>({});
   const [invoiceEmailed, setInvoiceEmailed] = useState<Record<string, boolean>>({});
+  const [invoiceNumberMap, setInvoiceNumberMap] = useState<Record<string, string>>({});
 
   const [fuelSurchargeRate, setFuelSurchargeRate] = useState<string>('');
   const [autoInvoiceEnabled, setAutoInvoiceEnabled] = useState(false);
@@ -176,6 +177,7 @@ const AppLayout: React.FC = () => {
     if (invoicedLoads.length === 0) {
       setPaymentData({});
       setInvoiceEmailed({});
+      setInvoiceNumberMap({});
       return;
     }
 
@@ -190,6 +192,7 @@ const AppLayout: React.FC = () => {
     if (!invoices || invoices.length === 0) {
       setPaymentData({});
       setInvoiceEmailed({});
+      setInvoiceNumberMap({});
       return;
     }
 
@@ -199,6 +202,15 @@ const AppLayout: React.FC = () => {
       emailedMap[inv.load_id] = !!inv.emailed_at;
     }
     setInvoiceEmailed(emailedMap);
+
+    // Build invoice number map from invoice data
+    const invNumberMap: Record<string, string> = {};
+    for (const inv of invoices) {
+      if (inv.invoice_number) {
+        invNumberMap[inv.load_id] = inv.invoice_number;
+      }
+    }
+    setInvoiceNumberMap(invNumberMap);
 
     const invoiceIds = invoices.map(inv => inv.id);
 
@@ -863,7 +875,7 @@ const AppLayout: React.FC = () => {
                             {sectionLoads.map((load) => {
                               const pInfo = paymentData[load.id];
                               return (
-                                <LoadCard key={load.id} load={load} onAssignDriver={handleAssignDriver} onViewDetails={handleViewDetails} onMarkDelivered={handleMarkDelivered} onGenerateInvoice={handleGenerateInvoice} onRecordPayment={handleRecordPayment} onDelete={handleDeleteLoad} paymentStatus={pInfo?.status} totalPaid={pInfo?.totalPaid} invoiceAmount={pInfo?.invoiceAmount} />
+                                <LoadCard key={load.id} load={load} onAssignDriver={handleAssignDriver} onViewDetails={handleViewDetails} onMarkDelivered={handleMarkDelivered} onGenerateInvoice={handleGenerateInvoice} onRecordPayment={handleRecordPayment} onDelete={handleDeleteLoad} paymentStatus={pInfo?.status} totalPaid={pInfo?.totalPaid} invoiceAmount={pInfo?.invoiceAmount} invoiceNumber={invoiceNumberMap[load.id]} />
                               );
                             })}
                           </div>

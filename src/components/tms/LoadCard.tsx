@@ -16,6 +16,7 @@ interface LoadCardProps {
   paymentStatus?: PaymentStatus;
   totalPaid?: number;
   invoiceAmount?: number;
+  invoiceNumber?: string;
 }
 
 
@@ -56,6 +57,7 @@ const LoadCard: React.FC<LoadCardProps> = ({
   paymentStatus,
   totalPaid,
   invoiceAmount,
+  invoiceNumber,
 }) => {
 
   const colors = statusColors[load.status] || statusColors.UNASSIGNED;
@@ -75,6 +77,9 @@ const LoadCard: React.FC<LoadCardProps> = ({
           <div className="flex items-center gap-2">
             <Truck className={`w-5 h-5 ${colors.text}`} />
             <span className="font-bold text-slate-800">{load.load_number}</span>
+            {invoiceNumber && (
+              <span className="text-xs font-medium text-slate-500">#{invoiceNumber}</span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <span className={`px-3 py-1 rounded-full text-xs font-semibold ${colors.bg} ${colors.text} border ${colors.border}`}>
