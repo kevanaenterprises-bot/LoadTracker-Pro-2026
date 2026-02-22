@@ -4,7 +4,7 @@ import { X, Printer, Loader2, AlertTriangle, RotateCcw, Trash2, ImageOff, FileDo
 
 import { supabase } from '@/lib/supabase';
 import { Load, Invoice, PODDocument, LoadStop, GeofenceTimestamp, CompanySettings, Customer } from '@/types/tms';
-import { generateInvoicePdf, generateInvoiceOnlyPdfBase64, downloadPdfBlob, convertPodsToPdf, convertImageToPdf, blobToBase64, loadImageToDataUrl, PodDocForPdf } from '@/lib/pdfUtils';
+import { generateInvoicePdf, generateCombinedInvoicePdfBase64, downloadPdfBlob, convertPodsToPdf, convertImageToPdf, blobToBase64, loadImageToDataUrl, PodDocForPdf } from '@/lib/pdfUtils';
 
 
 
@@ -324,9 +324,8 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
   };
 
   // ═══ EMAIL WITH PDF HANDLER ═══
-  // New approach: sends only the invoice page PDF (small ~200-500KB) to the edge function.
-  // The edge function then fetches POD files directly from Supabase storage and attaches them
-  // individually. This avoids the old timeout/size issues with sending one giant combined PDF.
+  // Generates a single combined PDF (invoice page + POD pages) and sends it as
+  // ONE attachment per email, matching the customer's requirement.
 
   const handleSendEmailWithPdf = async () => {
     if (!primaryEmail) {
@@ -340,27 +339,35 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
 
     setEmailSending(true);
     setEmailResult(null);
-    setPdfProgress('Generating invoice PDF...');
+    setPdfProgress('Generating combined invoice + POD PDF...');
 
     try {
-      // Step 1: Generate ONLY the invoice page as a small PDF (no PODs embedded)
-      // PODs will be fetched server-side from Supabase storage by the edge function
-      const { base64, filename } = await generateInvoiceOnlyPdfBase64({
+      // Step 1: Build the list of valid (non-broken) POD documents to embed
+      const validDocs: PodDocForPdf[] = documents
+        .filter(d => !brokenPodIds.has(d.id))
+        .map(d => ({ id: d.id, file_name: d.file_name, file_url: d.file_url, file_type: d.file_type }));
+
+      // Step 2: Generate ONE combined PDF — invoice on page 1, each POD on subsequent pages.
+      // This ensures the customer receives exactly one attachment per email.
+      const { base64, filename } = await generateCombinedInvoicePdfBase64({
         invoiceElement: invoicePageRef.current,
+        podDocuments: validDocs,
         invoiceNumber: invoice.invoice_number,
         loadNumber: load.load_number,
+        companyName: companySettings.company_name,
         onProgress: (msg) => setPdfProgress(msg),
       });
 
-      setPdfProgress('Sending email with attachments via Resend...');
+      setPdfProgress('Sending email...');
 
-      // Step 2: Call edge function — it receives the small invoice PDF
-      // and fetches + attaches POD files directly from storage via Resend API
+      // Step 3: Call edge function — pass the combined PDF and pods_combined: true so the
+      // edge function attaches only this single file (no separate POD fetching).
       const { data, error } = await supabase.functions.invoke('send-invoice-email', {
         body: {
           load_id: load.id,
           invoice_pdf_base64: base64,
           invoice_pdf_filename: filename,
+          pods_combined: true,
           additional_emails: additionalEmails.length > 0 ? additionalEmails : undefined,
         },
       });
@@ -405,9 +412,6 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
 
         // Build detailed success message
         let successMsg = data.message || `Invoice emailed to ${emailedTo}`;
-        if (data.attachment_failures > 0) {
-          successMsg += ` (Warning: ${data.attachment_failures} attachment(s) failed to attach)`;
-        }
         if (data.resend_id) {
           successMsg += ` [ID: ${data.resend_id.substring(0, 8)}...]`;
         }
