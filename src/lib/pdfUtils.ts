@@ -447,6 +447,21 @@ export async function generateInvoiceOnlyPdfBase64(options: {
 }
 
 /**
+ * Generate a combined invoice + POD PDF and return as base64.
+ * The invoice is on page 1 and each POD document occupies its own subsequent page.
+ * Used for email attachments so the customer receives exactly ONE file per email.
+ */
+export async function generateCombinedInvoicePdfBase64(options: PdfGenerationOptions): Promise<{
+  base64: string;
+  filename: string;
+}> {
+  const blob = await generateInvoicePdf(options);
+  const base64 = await blobToBase64(blob);
+  const filename = `Invoice_${options.invoiceNumber}_${options.loadNumber}.pdf`;
+  return { base64, filename };
+}
+
+/**
  * Load an image URL and convert it to a base64 data URL.
  * Used by the print function to embed images directly in the print HTML
  * so they don't need to be fetched again (avoids CORS / timing issues).
