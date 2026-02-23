@@ -1,16 +1,13 @@
 // Supabase Edge Function: send-invoice-email
 //
 // Sends an invoice email to the customer with exactly ONE PDF attachment.
-// When pods_combined === true (the standard path), the caller has already
-// merged the invoice page and all POD pages into a single PDF on the client.
-// The edge function simply looks up the recipient address and sends that
-// single file — no server-side POD fetching or separate attachment logic.
+// The caller always merges the invoice page and all POD pages into a single PDF
+// on the client (pods_combined === true) and passes it as invoice_pdf_base64.
+// The edge function simply looks up the recipient address and sends that file.
 //
-// Legacy path (pods_combined omitted / false): falls back to the old behaviour
-// of fetching POD files from Supabase storage and attaching them individually.
-// This path is kept for backwards compatibility but should not be used going
-// forward because it produces multiple attachments which are rejected by
-// some customers.
+// Legacy path (pods_combined omitted / false): falls back to fetching POD files
+// from Supabase storage and attaching them individually.  Kept for backward
+// compatibility only — new code should always pass pods_combined: true.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -226,7 +223,7 @@ function buildEmailHtml(opts: {
           <!-- Body -->
           <tr>
             <td style="padding:32px;">
-              <p style="margin:0 0 16px;font-size:16px;color:#1e293b;">Please find attached your invoice and proof of delivery document.</p>
+              <p style="margin:0 0 16px;font-size:16px;color:#1e293b;">Please find attached the invoice and proof of delivery (1 combined PDF: invoice first, POD follows).</p>
               <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:24px;">
                 <tr>
                   <td style="padding:16px 20px;border-bottom:1px solid #e2e8f0;">
@@ -247,10 +244,7 @@ function buildEmailHtml(opts: {
                   </td>
                 </tr>` : ''}
               </table>
-              <p style="margin:0 0 8px;font-size:14px;color:#475569;">
-                The attached PDF contains both the invoice and proof of delivery in a single document.
-                Please review and process at your earliest convenience.
-              </p>
+              <p style="margin:0 0 8px;font-size:14px;color:#475569;">The attached PDF contains both the invoice and proof of delivery in a single document. Please review and process at your earliest convenience.</p>
               <p style="margin:0;font-size:13px;color:#94a3b8;">
                 If you have any questions, please reply to this email or contact us directly.
               </p>
