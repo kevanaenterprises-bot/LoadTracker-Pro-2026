@@ -50,6 +50,7 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
 
   // Email state
   const [emailSending, setEmailSending] = useState(false);
+  const [isAfsEmailing, setIsAfsEmailing] = useState(false);
   const [emailResult, setEmailResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Additional email recipients (CC)
@@ -436,7 +437,106 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
     }
   };
 
+  // ═══ AFS ESUBMIT HANDLER ═══
+  // Sends one combined PDF (invoice + POD only) to satisfy AFS eSubmit requirements:
+  //   - Single unsecured PDF attachment named Invoice_<number>.pdf
+  //   - Invoice pages first, POD documentation follows
+  //   - No cover page; portrait layout
+  // Enable globally via VITE_AFS_COMBINED_PDF=true env var, or click the AFS eSubmit button.
+  const handleAfsEsubmit = async () => {
+    if (!primaryEmail) {
+      setEmailResult({ success: false, message: 'No customer email found. Please add a POD email or general email to the customer record first.' });
+      return;
+    }
+    if (!invoicePageRef.current || !invoice || !load) {
+      setEmailResult({ success: false, message: 'Invoice preview not ready. Please try again.' });
+      return;
+    }
 
+    setIsAfsEmailing(true);
+    setEmailResult(null);
+    setPdfProgress('Generating AFS combined PDF (invoice + POD)...');
+
+    try {
+      const validDocs: PodDocForPdf[] = documents
+        .filter(d => !brokenPodIds.has(d.id))
+        .map(d => ({ id: d.id, file_name: d.file_name, file_url: d.file_url, file_type: d.file_type }));
+
+      // Generate ONE combined PDF — invoice first, POD pages follow (AFS required order)
+      const { base64 } = await generateCombinedInvoicePdfBase64({
+        invoiceElement: invoicePageRef.current,
+        podDocuments: validDocs,
+        invoiceNumber: invoice.invoice_number,
+        loadNumber: load.load_number,
+        companyName: companySettings.company_name,
+        onProgress: (msg) => setPdfProgress(msg),
+      });
+
+      // AFS naming convention: Invoice_<number>.pdf (no load-number suffix per AFS spec)
+      const afsFilename = `Invoice_${invoice.invoice_number}.pdf`;
+
+      setPdfProgress('Sending AFS eSubmit email...');
+
+      // Pass afs_mode: true so the edge function uses the AFS-specific subject line
+      const { data, error } = await supabase.functions.invoke('send-invoice-email', {
+        body: {
+          load_id: load.id,
+          invoice_pdf_base64: base64,
+          invoice_pdf_filename: afsFilename,
+          pods_combined: true,
+          afs_mode: true,
+          additional_emails: additionalEmails.length > 0 ? additionalEmails : undefined,
+        },
+      });
+
+      if (error) {
+        let detailedError = 'Failed to send AFS eSubmit email';
+        try {
+          if (error.context && typeof error.context.json === 'function') {
+            const errBody = await error.context.json();
+            detailedError = errBody?.error || errBody?.message || error.message || detailedError;
+          } else if (error.message) {
+            detailedError = error.message;
+          }
+        } catch {
+          detailedError = error.message || detailedError;
+        }
+        if (detailedError.includes('Failed to send a request')) {
+          detailedError = 'Could not reach the email server. Please try again in a moment.';
+        }
+        setEmailResult({ success: false, message: detailedError });
+        setPdfProgress('');
+      } else if (data?.success) {
+        const now = new Date().toISOString();
+        const emailedTo = data.emailed_to || primaryEmail;
+        try {
+          await supabase
+            .from('invoices')
+            .update({ emailed_at: now, emailed_to: emailedTo })
+            .eq('load_id', load.id);
+        } catch (dbErr) {
+          console.warn('[AFS eSubmit] Failed to update emailed_at (non-critical):', dbErr);
+        }
+        let successMsg = data.message || `AFS eSubmit sent to ${emailedTo}`;
+        if (data.resend_id) {
+          successMsg += ` [ID: ${data.resend_id.substring(0, 8)}...]`;
+        }
+        setEmailResult({ success: true, message: `✅ AFS eSubmit: ${successMsg}` });
+        setPdfProgress('AFS eSubmit sent successfully!');
+        setTimeout(() => setPdfProgress(''), 3000);
+        if (onEmailSent) onEmailSent();
+      } else {
+        setEmailResult({ success: false, message: data?.error || 'Failed to send AFS eSubmit — unknown error' });
+        setPdfProgress('');
+      }
+    } catch (err: any) {
+      console.error('AFS eSubmit failed:', err);
+      setEmailResult({ success: false, message: err.message || 'Failed to generate PDF or send AFS eSubmit email' });
+      setPdfProgress('');
+    } finally {
+      setIsAfsEmailing(false);
+    }
+  };
 
 
 
@@ -702,7 +802,7 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
     month: 'numeric', day: 'numeric', year: 'numeric',
   });
 
-  const isAnyActionRunning = pdfGenerating || podsConverting || emailSending || printPreparing;
+  const isAnyActionRunning = pdfGenerating || podsConverting || emailSending || isAfsEmailing || printPreparing;
 
   const renderStopBlock = (stopType: 'pickup' | 'delivery', label: string, stopData: LoadStop | null, idx: number, total: number) => {
     const arrivedTs = stopData ? getTimestamp(stopType, 'arrived', stopData.id) : getTimestamp(stopType, 'arrived');
@@ -801,36 +901,35 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
               <span className="font-semibold text-slate-500 w-16 flex-shrink-0">Subject:</span>
               <span className="text-slate-800 font-medium">Invoice {invoice.invoice_number} - {companySettings.company_name} (Load #{load.load_number})</span>
             </div>
+            {/* Attachment display — always 1 combined PDF (invoice + POD pages merged client-side) */}
             <div className="space-y-1.5 pt-1 border-t border-slate-100 mt-2">
               <div className="flex gap-2 items-center">
                 <Paperclip className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                <span className="text-xs text-slate-600 font-medium">
-                  {1 + validDocs.length} attachment{1 + validDocs.length !== 1 ? 's' : ''}:
-                </span>
+                <span className="text-xs text-slate-600 font-medium">1 attachment:</span>
               </div>
               <div className="ml-5.5 space-y-1">
                 <div className="flex items-center gap-1.5 text-xs text-slate-500">
                   <FileDown className="w-3 h-3 text-blue-500 flex-shrink-0" />
                   <span>Invoice_{invoice.invoice_number}_{load.load_number}.pdf</span>
                   <span className="text-slate-300">|</span>
-                  <span className="text-blue-600 font-medium">Invoice page</span>
+                  <span className="text-blue-600 font-medium">
+                    Invoice{validDocs.length > 0 ? ` + ${validDocs.length} POD page${validDocs.length !== 1 ? 's' : ''}` : ''} (combined)
+                  </span>
                 </div>
-                {validDocs.map((doc, idx) => (
-                  <div key={doc.id} className="flex items-center gap-1.5 text-xs text-slate-500">
-                    <FileImage className="w-3 h-3 text-emerald-500 flex-shrink-0" />
-                    <span>{doc.file_name}</span>
-                    <span className="text-slate-300">|</span>
-                    <span className="text-emerald-600 font-medium">POD {idx + 1}</span>
-                    <span className="text-slate-300">|</span>
-                    <span className="text-slate-400 text-[10px]">via URL</span>
-                  </div>
-                ))}
               </div>
               <p className="text-[10px] text-slate-400 ml-5.5 italic">
-                POD files attached via direct URL — Resend fetches them from storage
+                One combined PDF — invoice first, POD pages follow
               </p>
             </div>
           </div>
+        </div>
+
+        {/* AFS eSubmit info panel — shown when AFS eSubmit button is available */}
+        <div className="bg-blue-50 border-x border-b border-blue-200 px-5 py-2.5">
+          <p className="text-xs text-blue-700 font-semibold">AFS eSubmit available</p>
+          <p className="text-xs text-blue-600 mt-0.5">
+            Use <strong>AFS eSubmit</strong> to send <code>Invoice_{invoice.invoice_number}.pdf</code> — invoice first, POD follows, unsecured PDF (1 file, AFS compliant).
+          </p>
         </div>
 
 
@@ -981,6 +1080,17 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                   {emailSending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                   <span className="hidden sm:inline">{emailSending ? 'Sending...' : 'Send Email'}</span>
                 </button>
+                {/* AFS eSubmit button — sends Invoice_<number>.pdf (combined, AFS compliant) */}
+                <button
+                  onClick={handleAfsEsubmit}
+                  disabled={isAnyActionRunning || !primaryEmail}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-blue-600/90 hover:bg-blue-600 text-white rounded-lg text-xs sm:text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={primaryEmail ? `AFS eSubmit — sends Invoice_${invoice?.invoice_number}.pdf (invoice + POD, 1 file)` : 'No customer email configured'}
+                  data-testid="button-send-afs-esubmit"
+                >
+                  {isAfsEmailing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  <span className="hidden sm:inline">{isAfsEmailing ? 'Sending AFS...' : 'AFS eSubmit'}</span>
+                </button>
               </>
             )}
             <button onClick={onClose} className="p-2 hover:bg-white/20 rounded-lg transition-colors">
@@ -1013,20 +1123,22 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
         )}
 
         {/* PDF / Email / Print Progress Bar */}
-        {(pdfGenerating || podsConverting || emailSending || printPreparing || pdfProgress) && (
+        {(pdfGenerating || podsConverting || emailSending || isAfsEmailing || printPreparing || pdfProgress) && (
           <div className={`px-6 py-2.5 border-b flex items-center gap-3 ${
             pdfProgress.startsWith('Error') ? 'bg-red-50 border-red-200' : 
+            isAfsEmailing ? 'bg-blue-50 border-blue-200' :
             emailSending ? 'bg-violet-50 border-violet-200' : 
             printPreparing ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-200'
           }`}>
-            {(pdfGenerating || podsConverting || emailSending || printPreparing) && (
+            {(pdfGenerating || podsConverting || emailSending || isAfsEmailing || printPreparing) && (
               <Loader2 className={`w-4 h-4 animate-spin flex-shrink-0 ${
-                emailSending ? 'text-violet-600' : printPreparing ? 'text-amber-600' : 'text-blue-600'
+                isAfsEmailing ? 'text-blue-600' : emailSending ? 'text-violet-600' : printPreparing ? 'text-amber-600' : 'text-blue-600'
               }`} />
             )}
             <p className={`text-sm font-medium ${
               pdfProgress.startsWith('Error') ? 'text-red-700' : 
               pdfProgress.includes('complete') || pdfProgress.includes('downloaded') || pdfProgress.includes('successfully') ? 'text-emerald-700' : 
+              isAfsEmailing ? 'text-blue-700' :
               emailSending ? 'text-violet-700' : printPreparing ? 'text-amber-700' : 'text-blue-700'
             }`}>
               {pdfProgress}
