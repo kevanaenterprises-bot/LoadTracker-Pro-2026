@@ -1,16 +1,13 @@
 // Supabase Edge Function: send-invoice-email
 //
 // Sends an invoice email to the customer with exactly ONE PDF attachment.
-// When pods_combined === true (the standard path), the caller has already
-// merged the invoice page and all POD pages into a single PDF on the client.
-// The edge function simply looks up the recipient address and sends that
-// single file — no server-side POD fetching or separate attachment logic.
+// The caller always merges the invoice page and all POD pages into a single PDF
+// on the client (pods_combined === true) and passes it as invoice_pdf_base64.
+// The edge function simply looks up the recipient address and sends that file.
 //
-// Legacy path (pods_combined omitted / false): falls back to the old behaviour
-// of fetching POD files from Supabase storage and attaching them individually.
-// This path is kept for backwards compatibility but should not be used going
-// forward because it produces multiple attachments which are rejected by
-// some customers.
+// Legacy path (pods_combined omitted / false): falls back to fetching POD files
+// from Supabase storage and attaching them individually.  Kept for backward
+// compatibility only — new code should always pass pods_combined: true.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -32,7 +29,6 @@ serve(async (req: Request) => {
       invoice_pdf_filename,
       pods_combined,
       additional_emails,
-      afs_mode,
     } = await req.json();
 
     if (!load_id || !invoice_pdf_base64 || !invoice_pdf_filename) {
@@ -149,17 +145,11 @@ serve(async (req: Request) => {
     }
 
     // ── Send via Resend ──
-    // AFS eSubmit mode: use AFS-specific subject line so the recipient can identify
-    // the submission type. Enabled when the client passes afs_mode: true.
-    const subject = afs_mode
-      ? `Invoice ${invoiceNumber} — ${companyName} — AFS eSubmit`
-      : `Invoice ${invoiceNumber} — ${companyName}${invoiceAmount ? ` (${invoiceAmount})` : ''}`;
-
     const emailBody = {
       from: `${companyName} <${companyEmail}>`,
       to: toAddresses,
-      subject,
-      html: buildEmailHtml({ companyName, invoiceNumber, invoiceAmount, loadNumber: load.load_number, afsMode: afs_mode === true }),
+      subject: `Invoice ${invoiceNumber} — ${companyName}${invoiceAmount ? ` (${invoiceAmount})` : ''}`,
+      html: buildEmailHtml({ companyName, invoiceNumber, invoiceAmount, loadNumber: load.load_number }),
       attachments,
     };
 
@@ -208,15 +198,8 @@ function buildEmailHtml(opts: {
   invoiceNumber: string;
   invoiceAmount: string;
   loadNumber: string;
-  afsMode?: boolean;
 }): string {
-  const { companyName, invoiceNumber, invoiceAmount, loadNumber, afsMode } = opts;
-  const bodyText = afsMode
-    ? 'Please find attached the invoice and proof of delivery for AFS eSubmit (1 combined PDF: invoice first, POD follows).'
-    : 'Please find attached your invoice and proof of delivery document.';
-  const footerNote = afsMode
-    ? 'The attached PDF contains both the invoice and proof of delivery in a single document (AFS eSubmit compliant — invoice first, POD follows, unsecured PDF).'
-    : 'The attached PDF contains both the invoice and proof of delivery in a single document. Please review and process at your earliest convenience.';
+  const { companyName, invoiceNumber, invoiceAmount, loadNumber } = opts;
   return `
 <!DOCTYPE html>
 <html>
@@ -234,13 +217,13 @@ function buildEmailHtml(opts: {
           <tr>
             <td style="background:linear-gradient(135deg,#1e40af,#3b82f6);padding:28px 32px;text-align:center;">
               <p style="margin:0;font-size:22px;font-weight:800;color:#ffffff;letter-spacing:1px;">${companyName}</p>
-              <p style="margin:6px 0 0;font-size:13px;color:rgba(255,255,255,0.85);">${afsMode ? 'AFS eSubmit — Invoice &amp; Proof of Delivery' : 'Invoice &amp; Proof of Delivery'}</p>
+              <p style="margin:6px 0 0;font-size:13px;color:rgba(255,255,255,0.85);">Invoice &amp; Proof of Delivery</p>
             </td>
           </tr>
           <!-- Body -->
           <tr>
             <td style="padding:32px;">
-              <p style="margin:0 0 16px;font-size:16px;color:#1e293b;">${bodyText}</p>
+              <p style="margin:0 0 16px;font-size:16px;color:#1e293b;">Please find attached the invoice and proof of delivery (1 combined PDF: invoice first, POD follows).</p>
               <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:24px;">
                 <tr>
                   <td style="padding:16px 20px;border-bottom:1px solid #e2e8f0;">
@@ -261,9 +244,7 @@ function buildEmailHtml(opts: {
                   </td>
                 </tr>` : ''}
               </table>
-              <p style="margin:0 0 8px;font-size:14px;color:#475569;">
-                ${footerNote}
-              </p>
+              <p style="margin:0 0 8px;font-size:14px;color:#475569;">The attached PDF contains both the invoice and proof of delivery in a single document. Please review and process at your earliest convenience.</p>
               <p style="margin:0;font-size:13px;color:#94a3b8;">
                 If you have any questions, please reply to this email or contact us directly.
               </p>
