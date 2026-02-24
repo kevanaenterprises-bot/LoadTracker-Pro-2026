@@ -19,7 +19,7 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' })); // Increase limit for base64 PDFs
 
 // Serve static React files
-const reactBuildPath = path.join(__dirname, '../new-loadtracker-2026/dist');
+const reactBuildPath = path.join(__dirname, 'public');
 app.use(express.static(reactBuildPath));
 
 // Root endpoint - welcome message
