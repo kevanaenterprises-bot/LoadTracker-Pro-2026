@@ -80,6 +80,8 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
   const [generatingInvoice, setGeneratingInvoice] = useState(false);
   const [sendingInvoiceEmail, setSendingInvoiceEmail] = useState(false);
   const [invoiceEmailResult, setInvoiceEmailResult] = useState<{ success: boolean; message: string; canRetry?: boolean } | null>(null);
+  const [showEmailConfirmModal, setShowEmailConfirmModal] = useState(false);
+  const [additionalCcEmails, setAdditionalCcEmails] = useState<string>('');
   const abortControllerRef = useRef<AbortController | null>(null);
 
 
@@ -1570,8 +1572,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                       </button>
                       <div className="flex gap-2 flex-1">
                         <button
-                          onClick={handleSendInvoiceEmail}
-                          disabled={sendingInvoiceEmail}
+                        onClick={() => setShowEmailConfirmModal(true)}
                           className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
                         >
                           {sendingInvoiceEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
