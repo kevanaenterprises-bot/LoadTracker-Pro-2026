@@ -1497,7 +1497,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">To:</label>
                 <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900">
-                  {load.customer?.email || 'No customer email configured'}
+                  {(load.customer?.pod_email || load.customer?.email || '').trim() || 'No customer email configured'}
                 </div>
               </div>
 
@@ -1507,7 +1507,6 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                 <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-600">
                   <div>kevin@go4fc.com</div>
                   <div>gofarmsbills@gmail.com</div>
-                  <div>esubmit@afs.net</div>
                 </div>
               </div>
 
@@ -1557,7 +1556,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
               </button>
               <button
                 onClick={handleSendInvoiceEmail}
-                disabled={sendingInvoiceEmail || !load.customer?.email}
+                disabled={sendingInvoiceEmail || !(load.customer?.pod_email || load.customer?.email || '').trim()}
                 className="flex-1 px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
               >
                 {sendingInvoiceEmail ? (

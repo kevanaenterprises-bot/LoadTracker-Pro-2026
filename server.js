@@ -317,7 +317,9 @@ app.post('/api/send-invoice-email', async (req, res) => {
     // Attach customer to load object for compatibility
     load.customer = customer;
 
-    console.log('[Invoice Email] Customer email:', customer.email);
+    // Determine primary email: prefer pod_email, fall back to general email
+    const primaryEmail = (customer.pod_email || customer.email || '').trim();
+    console.log('[Invoice Email] Customer email:', primaryEmail, '(from', customer.pod_email ? 'pod_email' : 'email', ')');
 
     // Fetch invoice for this load
     const { data: invoice, error: invoiceError } = await supabase
@@ -335,10 +337,10 @@ app.post('/api/send-invoice-email', async (req, res) => {
     }
 
     // Validate customer email
-    if (!load.customer || !load.customer.email) {
+    if (!primaryEmail) {
       return res.status(400).json({ 
         error: 'Customer email not found',
-        details: 'The load customer does not have an email address configured' 
+        details: 'The load customer does not have a POD email or general email address configured' 
       });
     }
 
@@ -352,8 +354,8 @@ app.post('/api/send-invoice-email', async (req, res) => {
     const companyName = settings?.find(s => s.key === 'company_name')?.value || 'GO 4 Farms & Cattle';
 
     // Prepare email details
-    const customerEmail = load.customer.email;
-    const ccEmails = [accountingEmail, 'gofarmsbills@gmail.com', 'esubmit@afs.net'].filter(Boolean);
+    const customerEmail = primaryEmail;
+    const ccEmails = [accountingEmail, 'gofarmsbills@gmail.com'].filter(Boolean);
     const invoiceNumber = invoice.invoice_number;
     const amount = invoice.amount;
 
