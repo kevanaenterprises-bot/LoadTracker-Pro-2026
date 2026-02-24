@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const sendInvoiceEmail = require('./sendInvoiceEmail');
 require('dotenv').config();
@@ -16,6 +17,10 @@ const supabase = createClient(
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '10mb' })); // Increase limit for base64 PDFs
+
+// Serve static React files
+const reactBuildPath = path.join(__dirname, '../new-loadtracker-2026/dist');
+app.use(express.static(reactBuildPath));
 
 // Root endpoint - welcome message
 app.get('/', (req, res) => {
@@ -187,8 +192,21 @@ app.post('/api/send-invoice-email', async (req, res) => {
   }
 });
 
+// SPA fallback - serve React index.html for all non-API routes
+// This must come AFTER all API routes (/api/*)
+app.get('*', (req, res) => {
+  const indexPath = path.join(reactBuildPath, 'index.html');
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      console.error('Error sending index.html:', err);
+      res.status(500).send('Server error');
+    }
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`📧 Email service ready with Outlook SMTP`);
   console.log(`🔗 Supabase connected: ${process.env.SUPABASE_URL ? 'Yes' : 'No'}`);
+  console.log(`📦 Serving React from: ${reactBuildPath}`);
 });
