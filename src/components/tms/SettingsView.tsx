@@ -126,9 +126,15 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     setTestEmailResult(null);
 
     try {
-      const { data, error } = await db.functions.invoke('send-invoice-email', {
-        body: { load_id: '__test__', test_email: testEmailAddress },
+      // Call new backend API instead of Supabase Edge Function
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+      const response = await fetch(`${API_URL}/api/send-invoice-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ load_id: '__test__', test_email: testEmailAddress }),
       });
+      const data = await response.json();
+      const error = response.ok ? null : { message: data.error || 'Test failed' };
 
       if (error) {
         setTestEmailResult({ 

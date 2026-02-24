@@ -679,9 +679,15 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
       }, 30000);
 
       try {
-        const { data, error } = await db.functions.invoke('send-invoice-email', {
-          body: { load_id: load.id },
+        // Call new backend API instead of Supabase Edge Function
+        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+        const response = await fetch(`${API_URL}/api/send-invoice-email`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ load_id: load.id }),
         });
+        const data = await response.json();
+        const error = response.ok ? null : { message: data.error || 'Failed to send email' };
         
         // Check if request was aborted
         if (abortController.signal.aborted) {
