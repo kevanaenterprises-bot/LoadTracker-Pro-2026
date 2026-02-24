@@ -599,201 +599,70 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
   const handleSendInvoiceEmail = async () => {
     if (!load) return;
     
-    // Debug logging to diagnose customer email issues
-    console.log('[Invoice Email Debug] Load object:', {
-      loadId: load.id,
-      loadNumber: load.load_number,
-      customerId: load.customer_id,
-      hasCustomerObject: !!load.customer,
-      customerEmail: load.customer?.email || 'NOT LOADED'
-    });
-    
-    // Check if customer is assigned to this load
-    if (!load.customer_id) {
-      setInvoiceEmailResult({ 
-        success: false, 
-        message: 'Cannot send invoice: No customer assigned to this load.' 
-      });
-      return;
-    }
-
-    // Set initial loading state for customer fetch
+    // Close the confirmation modal and set loading state
+    setShowEmailConfirmModal(false);
+    setSendingInvoiceEmail(true);
     setInvoiceEmailResult(null);
 
     try {
-      let customer;
+      const apiUrl = import.meta.env.VITE_API_URL || 'https://loadtracker-pro-2026-production.up.railway.app';
       
-      // If customer data is already loaded with the load, use it
-      if (load.customer && load.customer.email) {
-        customer = load.customer;
-        console.log('[Invoice Email] Using embedded customer data:', customer.email);
+      // Parse additional CC emails if provided
+      const ccList = additionalCcEmails
+        .split(',')
+        .map(email => email.trim())
+        .filter(email => email && email.includes('@'));
+
+      const response = await fetch(`${apiUrl}/api/send-invoice-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          load_id: load.id,
+          additional_cc: ccList.length > 0 ? ccList : undefined
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setInvoiceEmailResult({ success: false, message: data.error || 'Failed to send invoice' });
+      } else if (data.success) {
+        setInvoiceEmailResult({ 
+          success: true, 
+          message: data.message || `Invoice sent successfully` 
+        });
+
+        // Update emailed_at in database
+        const now = new Date().toISOString();
+        const emailedTo = data.emailed_to || '';
+        try {
+          await db.query(
+            `UPDATE invoices SET emailed_at = $1, emailed_to = $2 WHERE load_id = $3`,
+            [now, emailedTo, load.id]
+          );
+          console.log(`[LoadDetails Email] Updated emailed_at for load ${load.id}`);
+        } catch (dbErr) {
+          console.warn('[LoadDetails Email] Failed to update emailed_at:', dbErr);
+        }
+
+        // Update local invoice state
+        if (invoice) {
+          setInvoice({ ...invoice, emailed_at: now, emailed_to: emailedTo });
+        }
+
+        // Refresh parent data
+        if (onLoadUpdated) onLoadUpdated();
+        
+        // Clear additional CC emails
+        setAdditionalCcEmails('');
       } else {
-        // Otherwise fetch it
-        console.log('[Invoice Email] Fetching customer data for ID:', load.customer_id);
-        const { data: customerData, error: customerError } = await db
-          .from('customers')
-          .select('email, company_name')
-          .eq('id', load.customer_id)
-          .single();
-        
-        if (customerError || !customerData) {
-          setInvoiceEmailResult({ 
-            success: false, 
-            message: 'Cannot send invoice: Customer not found in database.' 
-          });
-          return;
-        }
-        customer = customerData;
-      }
-
-      if (!customer.email || customer.email.trim() === '') {
-        setInvoiceEmailResult({ 
-          success: false, 
-          message: `Cannot send invoice: Customer "${customer.company_name}" (ID: ${load.customer_id}) has no email address in the database. Please edit the customer profile and add an email address.` 
-        });
-        return;
-      }
-
-      // Basic email format validation
-      if (!customer.email.includes('@')) {
-        setInvoiceEmailResult({ 
-          success: false, 
-          message: `Cannot send invoice: Customer "${customer.company_name}" has an invalid email address. Please update the customer profile.` 
-        });
-        return;
-      }
-
-      // All validations passed, now set loading state and call the edge function
-      setSendingInvoiceEmail(true);
-
-      // Add detailed logging for debugging
-      console.log('[Invoice Email] Starting send for load:', load.id);
-      console.log('[Invoice Email] Customer email:', customer?.email);
-      console.log('[Invoice Email] Invoice ID:', invoice?.id);
-
-      // Create abort controller for cancellation support
-      const abortController = new AbortController();
-      abortControllerRef.current = abortController;
-
-      // Add a 30-second timeout to the edge function call
-      const timeoutId = setTimeout(() => {
-        abortController.abort(new Error('Request timed out after 30 seconds'));
-      }, 30000);
-
-      try {
-        // Call new backend API instead of Supabase Edge Function
-        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-        const response = await fetch(`${API_URL}/api/send-invoice-email`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ load_id: load.id }),
-        });
-        const data = await response.json();
-        const error = response.ok ? null : { message: data.error || 'Failed to send email' };
-        
-        // Check if request was aborted
-        if (abortController.signal.aborted) {
-          const abortReason = abortController.signal.reason;
-          throw abortReason || new Error('Request cancelled');
-        }
-
-        if (error) {
-          console.error('[Invoice Email] Edge Function Error:', {
-            loadId: load.id,
-            invoiceId: invoice?.id,
-            error: error,
-            message: error.message
-          });
-          
-          // Determine if this is a network/connectivity error
-          const isNetworkError = error.message?.toLowerCase().includes('network') || 
-                                 error.message?.toLowerCase().includes('fetch') ||
-                                 error.message?.toLowerCase().includes('connection');
-          
-          setInvoiceEmailResult({ 
-            success: false, 
-            message: isNetworkError 
-              ? `Failed to send invoice email: Network error. Please check your internet connection and try again.`
-              : `Failed to send invoice email: ${error.message || 'Unknown error'}. Please try again or contact support if the issue persists.`,
-            canRetry: true
-          });
-        } else if (data?.success) {
-          console.log('[Invoice Email] Success:', {
-            loadId: load.id,
-            invoiceId: invoice?.id,
-            emailedTo: data.emailed_to,
-            emailedAt: data.emailed_at
-          });
-          
-          setInvoiceEmailResult({ 
-            success: true, 
-            message: data.message || `Invoice sent to ${data.emailed_to}` 
-          });
-          // Update local invoice state with email info
-          if (invoice) {
-            setInvoice({ ...invoice, emailed_at: data.emailed_at, emailed_to: data.emailed_to });
-          }
-        } else {
-          console.error('[Invoice Email] Server returned non-success:', {
-            loadId: load.id,
-            invoiceId: invoice?.id,
-            data: data
-          });
-          
-          setInvoiceEmailResult({ 
-            success: false, 
-            message: data?.error || data?.message || 'Invoice email failed to send. The server did not return a success response. Please try again.',
-            canRetry: true
-          });
-        }
-      } finally {
-        clearTimeout(timeoutId);
-        abortControllerRef.current = null;
+        setInvoiceEmailResult({ success: false, message: data.error || 'Failed to send invoice' });
       }
     } catch (err: any) {
-      console.error('[Invoice Email] Exception:', {
-        loadId: load.id,
-        invoiceId: invoice?.id,
-        error: err,
-        message: err.message,
-        stack: err.stack
-      });
-      
-      // Differentiate between timeout, network, cancellation, and other errors
-      let errorMessage = 'Failed to send invoice email: ';
-      let canRetry = false;
-      
-      if (err.message?.includes('timed out') || err.message?.includes('timeout')) {
-        errorMessage += 'Request timed out after 30 seconds. This may indicate a network issue or server overload. Please check your internet connection and try again.';
-        canRetry = true;
-      } else if (err.message?.includes('network') || err.message?.includes('fetch') || err.message?.includes('Failed to fetch')) {
-        errorMessage += 'Network error. Please check your internet connection and try again.';
-        canRetry = true;
-      } else if (err.message?.includes('cancelled') || err.message?.includes('abort')) {
-        errorMessage += 'Request was cancelled.';
-        canRetry = true;
-      } else if (err.message?.includes('401') || err.message?.includes('unauthorized')) {
-        errorMessage += 'Authentication error. Please refresh the page and try again.';
-        canRetry = true;
-      } else if (err.message?.includes('403') || err.message?.includes('forbidden')) {
-        errorMessage += 'Permission denied. Please contact your administrator.';
-        canRetry = false;
-      } else if (err.message?.includes('500') || err.message?.includes('server error')) {
-        errorMessage += 'Server error occurred. Please try again later or contact support.';
-        canRetry = true;
-      } else {
-        errorMessage += err.message || 'An unexpected error occurred. Please try again or contact support if the issue persists.';
-        canRetry = true;
-      }
-      
-      setInvoiceEmailResult({ 
-        success: false, 
-        message: errorMessage,
-        canRetry: canRetry
-      });
+      console.error('[Email Error]:', err);
+      setInvoiceEmailResult({ success: false, message: err.message || 'Network error - check connection' });
     } finally {
       setSendingInvoiceEmail(false);
-      abortControllerRef.current = null;
     }
   };
 
@@ -1573,6 +1442,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                       <div className="flex gap-2 flex-1">
                         <button
                         onClick={() => setShowEmailConfirmModal(true)}
+                        disabled={sendingInvoiceEmail}
                           className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
                         >
                           {sendingInvoiceEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
@@ -1635,6 +1505,100 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
           if (onLoadUpdated) onLoadUpdated();
         }}
       />
+
+      {/* Email Confirmation Modal with CC options */}
+      {showEmailConfirmModal && load && invoice && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-slate-200">
+              <h3 className="text-xl font-semibold text-slate-900">Send Invoice Email</h3>
+              <p className="text-sm text-slate-600 mt-1">Review recipients before sending</p>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* To: Field */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">To:</label>
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900">
+                  {load.customer?.email || 'No customer email configured'}
+                </div>
+              </div>
+
+              {/* Default CC: Field */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">CC (default):</label>
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-600">
+                  <div>kevin@go4fc.com</div>
+                  <div>gofarmsbills@gmail.com</div>
+                  <div>esubmit@afs.net</div>
+                </div>
+              </div>
+
+              {/* Additional CC: Field */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Additional CC (optional):
+                </label>
+                <input
+                  type="text"
+                  value={additionalCcEmails}
+                  onChange={(e) => setAdditionalCcEmails(e.target.value)}
+                  placeholder="email1@example.com, email2@example.com"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                />
+                <p className="text-xs text-slate-500 mt-1">Separate multiple emails with commas</p>
+              </div>
+
+              {/* Invoice Details */}
+              <div className="pt-4 border-t border-slate-200">
+                <div className="text-sm text-slate-600 space-y-1">
+                  <div className="flex justify-between">
+                    <span>Invoice #:</span>
+                    <span className="font-medium text-slate-900">{invoice.invoice_number}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Amount:</span>
+                    <span className="font-medium text-slate-900">${invoice.amount?.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Load #:</span>
+                    <span className="font-medium text-slate-900">{load.bol_number}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-200 flex gap-3">
+              <button
+                onClick={() => {
+                  setShowEmailConfirmModal(false);
+                  setAdditionalCcEmails('');
+                }}
+                className="flex-1 px-4 py-2 text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendInvoiceEmail}
+                disabled={sendingInvoiceEmail || !load.customer?.email}
+                className="flex-1 px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+              >
+                {sendingInvoiceEmail ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Mail className="w-4 h-4" />
+                    Send Email
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </>
   );
