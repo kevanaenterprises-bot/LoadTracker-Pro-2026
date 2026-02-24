@@ -3,6 +3,7 @@ const cors = require('cors');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const sendInvoiceEmail = require('./sendInvoiceEmail');
+const { combinePDFs } = require('./combinePDFs');
 require('dotenv').config();
 
 const app = express();
@@ -328,26 +329,94 @@ app.post('/api/send-invoice-email', async (req, res) => {
     const subject = `Invoice ${invoiceNumber} — ${companyName} ($${amount})`;
     const text = `Please see attached invoice.\n\nThank you,\n${companyName}`;
 
-    // Prepare PDF attachment
-    let attachments = [];
+    // Fetch POD/supporting documents for this load
+    const { data: podDocuments } = await supabase
+      .from('loads_documents')
+      .select('*')
+      .eq('load_id', load_id)
+      .order('created_at', { ascending: true });
+
+    console.log('[Invoice Email] Found', podDocuments?.length || 0, 'POD documents');
+
+    // Prepare files for PDF combining (invoice first, then PODs)
+    let filesToCombine = [];
     
     if (pdfBase64) {
-      // If PDF is passed from frontend (base64)
-      attachments.push({
-        filename: `Invoice-${invoiceNumber}.pdf`,
-        content: pdfBase64,
-        encoding: 'base64'
+      // Add invoice PDF as first file
+      filesToCombine.push({
+        type: 'pdf',
+        data: pdfBase64,
+        filename: `Invoice-${invoiceNumber}.pdf`
       });
     } else if (invoiceData && invoiceData.pdfPath) {
-      // If PDF path is provided
-      attachments.push({
-        filename: `Invoice-${invoiceNumber}.pdf`,
-        path: invoiceData.pdfPath
+      // Read invoice PDF from file path
+      const fs = require('fs').promises;
+      const invoicePdfData = await fs.readFile(invoiceData.pdfPath);
+      filesToCombine.push({
+        type: 'pdf',
+        data: invoicePdfData,
+        filename: `Invoice-${invoiceNumber}.pdf`
       });
+    }
+
+    // Add POD documents
+    if (podDocuments && podDocuments.length > 0) {
+      for (const doc of podDocuments) {
+        try {
+          // Fetch the actual file from storage
+          if (doc.storage_path) {
+            const { data: fileData, error: downloadError } = await supabase
+              .storage
+              .from('load-documents')
+              .download(doc.storage_path);
+
+            if (!downloadError && fileData) {
+              const buffer = Buffer.from(await fileData.arrayBuffer());
+              const fileType = doc.file_type?.toLowerCase();
+              
+              // Determine if it's an image or PDF
+              const imageExtensions = ['.jpg', '.jpeg', '.png'];
+              const ext = path.extname(doc.file_name).toLowerCase();
+              
+              filesToCombine.push({
+                type: imageExtensions.includes(ext) ? 'image' : 'pdf',
+                data: buffer,
+                filename: doc.file_name
+              });
+            }
+          }
+        } catch (err) {
+          console.error(`[Invoice Email] Error fetching POD ${doc.file_name}:`, err);
+        }
+      }
+    }
+
+    // Combine all PDFs and images into one file
+    let attachments = [];
+    
+    if (filesToCombine.length > 0) {
+      console.log('[Invoice Email] Combining', filesToCombine.length, 'files into one PDF');
+      
+      try {
+        const combinedPdfBuffer = await combinePDFs(filesToCombine);
+        attachments.push({
+          filename: `Invoice-${invoiceNumber}-Complete.pdf`,
+          content: combinedPdfBuffer
+        });
+        console.log('[Invoice Email] Combined PDF created successfully');
+      } catch (combineError) {
+        console.error('[Invoice Email] PDF combination failed:', combineError);
+        // Fallback: send individual files
+        if (pdfBase64) {
+          attachments.push({
+            filename: `Invoice-${invoiceNumber}.pdf`,
+            content: pdfBase64,
+            encoding: 'base64'
+          });
+        }
+      }
     } else {
-      // TODO: Generate PDF here if needed
-      // For now, just send without attachment or return error
-      console.warn('[Invoice Email] No PDF provided - sending email without attachment');
+      console.warn('[Invoice Email] No files to combine - sending without attachment');
     }
 
     // Send the email
