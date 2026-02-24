@@ -54,9 +54,11 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
 
   select(columns: string = '*'): QueryBuilder {
     // Validate column names to prevent SQL injection
-    // Allow: column names, *, commas, spaces, and basic SQL functions like COUNT(), SUM(), etc.
-    const validSelectPattern = /^[a-zA-Z0-9_.*,\s()]+$/;
+    // Allow: column names, *, commas, spaces, colons (for joins), parentheses, and basic SQL functions
+    // Note: This also allows Supabase-style joins like "customer:customers(*)"
+    const validSelectPattern = /^[a-zA-Z0-9_.*,\s():!-]+$/;
     if (!validSelectPattern.test(columns)) {
+      console.error('Invalid column specification:', columns);
       throw new Error('Invalid column specification');
     }
     this.selectColumns = columns;
