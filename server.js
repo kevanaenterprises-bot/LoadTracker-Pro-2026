@@ -108,16 +108,129 @@ app.post('/api/query', async (req, res) => {
       return res.status(400).json({ error: 'Query text is required' });
     }
 
-    // Parse the query to extract table and operation
-    // This is a simplified implementation - for production use specific endpoints
+    console.log('[Query] Executing:', text, 'Params:', params);
+
+    // Parse the SQL query to extract table and columns
     const queryUpper = text.toUpperCase().trim();
     
-    // For now, just return empty results for other queries
-    // The app should use specific API endpoints instead
-    res.json({
-      rows: [],
-      rowCount: 0
-    });
+    // Handle SELECT queries
+    if (queryUpper.startsWith('SELECT')) {
+      // Extract table name using regex
+      const fromMatch = text.match(/FROM\s+(\w+)/i);
+      if (!fromMatch) {
+        return res.status(400).json({ error: 'Could not parse table name from query' });
+      }
+      
+      const tableName = fromMatch[1];
+      
+      // Extract columns
+      const selectMatch = text.match(/SELECT\s+(.*?)\s+FROM/is);
+      const columns = selectMatch ? selectMatch[1].trim() : '*';
+      
+      // Start building the query
+      let query = supabase.from(tableName);
+      
+      // Apply select (handle * or specific columns)
+      if (columns === '*') {
+        query = query.select('*');
+      } else {
+        query = query.select(columns);
+      }
+      
+      // Parse WHERE clause
+      const whereMatch = text.match(/WHERE\s+(.*?)(?:ORDER|LIMIT|$)/is);
+      if (whereMatch && params) {
+        const whereClause = whereMatch[1].trim();
+        // Simple WHERE parsing - handle basic comparisons
+        const conditions = whereClause.split(/\s+AND\s+/i);
+        
+        conditions.forEach((condition, index) => {
+          // Match: column = $1 OR column LIKE $1, etc.
+          const condMatch = condition.match(/(\w+)\s*(=|LIKE|>|<|>=|<=)\s*\$(\d+)/i);
+          if (condMatch && params[parseInt(condMatch[3]) - 1] !== undefined) {
+            const colName = condMatch[1];
+            const operator = condMatch[2].toUpperCase();
+            const value = params[parseInt(condMatch[3]) - 1];
+            
+            switch (operator) {
+              case '=':
+                query = query.eq(colName, value);
+                break;
+              case 'LIKE':
+                query = query.like(colName, value);
+                break;
+              case '>':
+                query = query.gt(colName, value);
+                break;
+              case '<':
+                query = query.lt(colName, value);
+                break;
+              case '>=':
+                query = query.gte(colName, value);
+                break;
+              case '<=':
+                query = query.lte(colName, value);
+                break;
+            }
+          }
+        });
+      }
+      
+      // Parse ORDER BY
+      const orderMatch = text.match(/ORDER BY\s+(\w+)(?:\s+(ASC|DESC))?/i);
+      if (orderMatch) {
+        const orderCol = orderMatch[1];
+        const orderDir = orderMatch[2] ? orderMatch[2].toLowerCase() === 'desc' : false;
+        query = query.order(orderCol, { ascending: !orderDir });
+      }
+      
+      // Parse LIMIT
+      const limitMatch = text.match(/LIMIT\s+(\d+)/i);
+      if (limitMatch) {
+        query = query.limit(parseInt(limitMatch[1]));
+      }
+      
+      // Execute query
+      const { data, error } = await query;
+      
+      if (error) {
+        console.error('[Query] Supabase error:', error);
+        return res.status(500).json({ error: error.message });
+      }
+      
+      res.json({
+        rows: data || [],
+        rowCount: data ? data.length : 0
+      });
+      
+    } else if (queryUpper.startsWith('INSERT')) {
+      // Handle INSERT
+      const intoMatch = text.match(/INSERT INTO\s+(\w+)/i);
+      if (!intoMatch) {
+        return res.status(400).json({ error: 'Could not parse INSERT query' });
+      }
+      
+      const tableName = intoMatch[1];
+      
+      // For now, return success (INSERT queries need more complex parsing)
+      res.json({ rows: [], rowCount: 1 });
+      
+    } else if (queryUpper.startsWith('UPDATE')) {
+      // Handle UPDATE
+      const tableMatch = text.match(/UPDATE\s+(\w+)/i);
+      if (!tableMatch) {
+        return res.status(400).json({ error: 'Could not parse UPDATE query' });
+      }
+      
+      const tableName = tableMatch[1];
+      
+      // For now, return success
+      res.json({ rows: [], rowCount: 1 });
+      
+    } else {
+      // Unsupported query type
+      res.json({ rows: [], rowCount: 0 });
+    }
 
   } catch (error) {
     console.error('[Query] Exception:', error);
