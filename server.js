@@ -269,14 +269,10 @@ app.post('/api/send-invoice-email', async (req, res) => {
 
     console.log('[Invoice Email] Processing for load_id:', load_id);
 
-    // Fetch load details with related data
+    // Fetch load details FIRST (without joins)
     const { data: load, error: loadError } = await supabase
       .from('loads')
-      .select(`
-        *,
-        customer:customers(*),
-        driver:drivers(*)
-      `)
+      .select('*')
       .eq('id', load_id)
       .single();
 
@@ -287,6 +283,41 @@ app.post('/api/send-invoice-email', async (req, res) => {
         details: loadError?.message 
       });
     }
+
+    console.log('[Invoice Email] Load data:', { 
+      id: load.id, 
+      customer_id: load.customer_id,
+      customer_number: load.customer_number,
+      all_columns: Object.keys(load)
+    });
+
+    // Fetch customer separately using whichever ID field exists
+    const customerId = load.customer_id || load.customer_number;
+    if (!customerId) {
+      return res.status(400).json({ 
+        error: 'No customer associated with this load',
+        details: 'Load is missing customer_id or customer_number' 
+      });
+    }
+
+    const { data: customer, error: customerError } = await supabase
+      .from('customers')
+      .select('*')
+      .eq('id', customerId)
+      .single();
+
+    if (customerError || !customer) {
+      console.error('[Invoice Email] Customer fetch error:', customerError);
+      return res.status(404).json({ 
+        error: 'Customer not found',
+        details: customerError?.message 
+      });
+    }
+
+    // Attach customer to load object for compatibility
+    load.customer = customer;
+
+    console.log('[Invoice Email] Customer email:', customer.email);
 
     // Fetch invoice for this load
     const { data: invoice, error: invoiceError } = await supabase
