@@ -41,6 +41,90 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// API health check endpoint (used by frontend)
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Login endpoint
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    // Query users table
+    const { data: users, error } = await supabase
+      .from('users')
+      .select('id, email, role, driver_id, name, is_active')
+      .eq('email', email.toLowerCase().trim())
+      .eq('password_hash', password)
+      .eq('is_active', true)
+      .limit(1);
+
+    if (error) {
+      console.error('[Login] Query error:', error);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    if (!users || users.length === 0) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const user = users[0];
+
+    // Update last login
+    await supabase
+      .from('users')
+      .update({ last_login: new Date().toISOString() })
+      .eq('id', user.id);
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        driver_id: user.driver_id,
+        name: user.name,
+        is_active: user.is_active
+      }
+    });
+
+  } catch (error) {
+    console.error('[Login] Error:', error);
+    res.status(500).json({ error: 'An unexpected error occurred' });
+  }
+});
+
+// General database query endpoint (for backwards compatibility)
+app.post('/api/query', async (req, res) => {
+  try {
+    const { text, params } = req.body;
+    
+    if (!text) {
+      return res.status(400).json({ error: 'Query text is required' });
+    }
+
+    // Parse the query to extract table and operation
+    // This is a simplified implementation - for production use specific endpoints
+    const queryUpper = text.toUpperCase().trim();
+    
+    // For now, just return empty results for other queries
+    // The app should use specific API endpoints instead
+    res.json({
+      rows: [],
+      rowCount: 0
+    });
+
+  } catch (error) {
+    console.error('[Query] Exception:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Main invoice email endpoint (compatible with old Edge Function interface)
 app.post('/api/send-invoice-email', async (req, res) => {
   try {
