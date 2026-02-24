@@ -484,9 +484,12 @@ app.post('/api/send-invoice-email', async (req, res) => {
 
   } catch (error) {
     console.error('[Invoice Email] Error:', error);
+    console.error('[Invoice Email] Error stack:', error.stack);
+    console.error('[Invoice Email] Error type:', error.constructor.name);
     res.status(500).json({ 
       error: 'Failed to send invoice email', 
-      details: error.message 
+      details: error.message,
+      stack: error.stack 
     });
   }
 });
