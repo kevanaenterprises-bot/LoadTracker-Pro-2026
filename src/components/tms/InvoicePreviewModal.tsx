@@ -12,17 +12,18 @@ interface InvoicePreviewModalProps {
   isOpen: boolean;
   load: Load | null;
   invoice: Invoice | null;
+  customer?: Customer | null;
   onClose: () => void;
   onPodReuploadRequested?: () => void;
   onEmailSent?: () => void;
 }
 
-const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load, invoice, onClose, onPodReuploadRequested, onEmailSent }) => {
+const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load, invoice, customer: initialCustomer, onClose, onPodReuploadRequested, onEmailSent }) => {
 
   const [documents, setDocuments] = useState<PODDocument[]>([]);
   const [stops, setStops] = useState<LoadStop[]>([]);
   const [timestamps, setTimestamps] = useState<GeofenceTimestamp[]>([]);
-  const [customer, setCustomer] = useState<Customer | null>(null);
+  const [customer, setCustomer] = useState<Customer | null>(initialCustomer || null);
   const [fuelSurchargeRate, setFuelSurchargeRate] = useState<string>('');
   const [companySettings, setCompanySettings] = useState<CompanySettings>({
     company_name: 'GO 4 Farms & Cattle',
@@ -148,7 +149,10 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
         });
         if (settingsMap.fuel_surcharge_rate) setFuelSurchargeRate(settingsMap.fuel_surcharge_rate);
       }
-      if (load.customer_id) {
+      // Use passed customer if available, otherwise fetch it
+      if (initialCustomer) {
+        setCustomer(initialCustomer);
+      } else if (load.customer_id) {
         const { data: customerData } = await supabase.from('customers').select('*').eq('id', load.customer_id).single();
         if (customerData) setCustomer(customerData);
       } else {

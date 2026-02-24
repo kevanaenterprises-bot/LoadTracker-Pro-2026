@@ -62,6 +62,7 @@ const statusLabels: Record<string, string> = {
 const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClose, onEdit, onDelete, onLoadUpdated, onAssignDriver }) => {
   const [documents, setDocuments] = useState<PODDocument[]>([]);
   const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [customer, setCustomer] = useState<Customer | null>(null);
   const [stops, setStops] = useState<LoadStop[]>([]);
   const [loading, setLoading] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -119,6 +120,20 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
     if (!load) return;
     const loadId = load.id;
     setLoading(true);
+
+    // Fetch customer if load has customer_id (needed for email button to enable)
+    if (load.customer_id) {
+      const { data: cust } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('id', load.customer_id)
+        .single();
+      
+      if (currentLoadIdRef.current !== loadId) return;
+      if (cust) {
+        setCustomer(cust);
+      }
+    }
 
     // Fetch POD documents
     const { data: docs } = await supabase
@@ -1469,6 +1484,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
         isOpen={showInvoicePreview}
         load={load}
         invoice={invoice}
+        customer={customer}
         onClose={() => setShowInvoicePreview(false)}
         onPodReuploadRequested={() => {
           setShowInvoicePreview(false);
