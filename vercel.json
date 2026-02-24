@@ -1,0 +1,32 @@
+{
+  "rewrites": [
+    {
+      "source": "/driver-portal",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/driver-portal/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/driver",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/driver/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/portal",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/portal/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/((?!assets|placeholder\\.svg|robots\\.txt|_redirects|404\\.html).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
