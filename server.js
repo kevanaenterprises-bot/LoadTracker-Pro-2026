@@ -17,6 +17,20 @@ const supabase = createClient(
 app.use(cors());
 app.use(express.json({ limit: '10mb' })); // Increase limit for base64 PDFs
 
+// Root endpoint - welcome message
+app.get('/', (req, res) => {
+  res.json({
+    name: 'LoadTracker Pro Email API',
+    status: 'running',
+    version: '1.0.0',
+    endpoints: {
+      health: 'GET /health',
+      sendInvoiceEmail: 'POST /api/send-invoice-email'
+    },
+    message: 'Direct Outlook SMTP Email Service - No attachment limits! 📧'
+  });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
