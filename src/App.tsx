@@ -10,7 +10,6 @@ import { ThemeProvider } from "@/components/theme-provider";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import DriverPortalPage from "./pages/DriverPortalPage";
-import LandingPage from "./pages/LandingPage";
 
 const queryClient = new QueryClient();
 
@@ -99,9 +98,6 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <Routes>
-            {/* Landing/Demo page - public facing */}
-            <Route path="/demo" element={<LandingPage />} />
-            
             {/* Admin/TMS app routes */}
             <Route path="/" element={
               <TokenRedirectGuard>
