@@ -102,8 +102,13 @@ const App = () => (
             {/* Landing/Demo page - public facing */}
             <Route path="/demo" element={<LandingPage />} />
             
-            {/* Root route - TMS app protected by TokenRedirectGuard */}
+            {/* Admin/TMS app routes */}
             <Route path="/" element={
+              <TokenRedirectGuard>
+                <Index />
+              </TokenRedirectGuard>
+            } />
+            <Route path="/app" element={
               <TokenRedirectGuard>
                 <Index />
               </TokenRedirectGuard>
