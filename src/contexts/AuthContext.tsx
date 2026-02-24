@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { query } from '@/lib/database';
 
 export interface User {
   id: string;
@@ -54,33 +53,40 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const result = await query(
-        `SELECT id, email, role, driver_id, name, is_active 
-         FROM users 
-         WHERE email = $1 AND password_hash = $2 AND is_active = true`,
-        [email.toLowerCase().trim(), password]
-      );
+      const API_URL = import.meta.env.VITE_API_URL || 
+        (window.location.hostname === 'localhost' 
+          ? 'http://localhost:3001' 
+          : window.location.origin);
 
-      if (result.rows.length === 0) {
-        return { success: false, error: 'Invalid email or password' };
+      const response = await fetch(`${API_URL}/api/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          email: email.toLowerCase().trim(), 
+          password 
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return { success: false, error: data.error || 'Login failed' };
       }
 
-      const data = result.rows[0];
+      if (!data.success || !data.user) {
+        return { success: false, error: 'Invalid response from server' };
+      }
 
       const userData: User = {
-        id: data.id,
-        email: data.email,
-        role: data.role,
-        driver_id: data.driver_id,
-        name: data.name,
-        is_active: data.is_active,
+        id: data.user.id,
+        email: data.user.email,
+        role: data.user.role,
+        driver_id: data.user.driver_id,
+        name: data.user.name,
+        is_active: data.user.is_active,
       };
-
-      // Update last login
-      await query(
-        'UPDATE users SET last_login = $1 WHERE id = $2',
-        [new Date().toISOString(), data.id]
-      );
 
       // Store in localStorage
       localStorage.setItem('tms_user', JSON.stringify(userData));
