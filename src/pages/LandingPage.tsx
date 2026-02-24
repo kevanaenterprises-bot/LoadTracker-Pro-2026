@@ -859,15 +859,20 @@ const LandingPage: React.FC = () => {
             /* Interactive Demo Experience */
             <div ref={demoExperienceRef}>
               <div className="text-center mb-8">
-                <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-100 text-emerald-700 rounded-full text-sm font-semibold mb-4">
-                  <CheckCircle2 className="w-4 h-4" />
-                  Demo Active — Explore LoadTracker PRO
+                <div className="inline-flex items-center gap-2 px-4 py-2 bg-amber-100 text-amber-700 rounded-full text-sm font-semibold mb-4">
+                  ⚠️ DEMO MODE — Sample Data Only
                 </div>
                 <h2 className="text-3xl lg:text-4xl font-extrabold text-slate-900 mb-3">
                   Welcome, {formData.name}!
                 </h2>
+                <div className="max-w-2xl mx-auto mb-6 p-4 bg-amber-50 border-2 border-amber-200 rounded-xl">
+                  <p className="text-sm font-semibold text-amber-900 mb-2">🔒 This is NOT your real company data</p>
+                  <p className="text-sm text-amber-800">
+                    What you see here is a self-contained demo with sample loads, drivers, and customers. None of this is connected to your real company information. 
+                  </p>
+                </div>
                 <p className="text-lg text-slate-500 max-w-2xl mx-auto mb-2">
-                  This is an interactive demo with sample data. Click around, explore every feature, and see how LoadTracker PRO can run your operation.
+                  Click around, explore every feature, and see how LoadTracker PRO can run your operation.
                 </p>
                 <p className="text-sm text-slate-400">
                   Interested? Email <a href="mailto:kevin@go4fc.com" className="text-blue-600 font-semibold hover:underline">kevin@go4fc.com</a> — that's the only way we'll talk.

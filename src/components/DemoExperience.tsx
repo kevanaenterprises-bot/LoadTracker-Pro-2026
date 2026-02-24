@@ -698,6 +698,24 @@ const DemoExperience: React.FC = () => {
 
         {/* Main Content */}
         <div className="flex-1 flex flex-col min-w-0">
+          {/* DEMO MODE WARNING BANNER - CRITICAL VISIBILITY */}
+          <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-slate-900 px-6 py-4 border-b border-orange-600 shadow-lg">
+            <div className="flex items-center justify-between max-w-full">
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 bg-slate-900 rounded-full animate-pulse"></div>
+                <div>
+                  <p className="font-bold text-sm">⚠️ THIS IS A DEMO — NOT YOUR REAL DATA</p>
+                  <p className="text-xs text-slate-800 mt-0.5">All loads, drivers, and information shown here are sample data for demonstration purposes only.</p>
+                </div>
+              </div>
+              <a
+                href="/demo"
+                className="ml-4 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-semibold hover:bg-slate-800 transition-colors whitespace-nowrap"
+              >
+                Back to Demo
+              </a>
+            </div>
+          </div>
           <header className="bg-white border-b border-slate-200 shadow-sm">
             <div className="flex items-center justify-between px-4 lg:px-6 py-3">
               <div className="flex items-center gap-3">
@@ -721,14 +739,36 @@ const DemoExperience: React.FC = () => {
             </div>
           </header>
 
-          <main className="flex-1 p-4 lg:p-6 overflow-y-auto">
-            {currentView === 'dashboard' && renderDashboard()}
-            {currentView === 'tracking' && renderTracking()}
-            {currentView === 'drivers' && renderDrivers()}
-            {currentView === 'customers' && renderCustomers()}
-            {currentView === 'invoicing' && renderInvoicing()}
-            {currentView === 'ifta' && renderIFTA()}
-            {currentView === 'settings' && renderSettings()}
+          <main className="flex-1 p-4 lg:p-6 overflow-y-auto flex flex-col">
+            <div className="flex-1">
+              {currentView === 'dashboard' && renderDashboard()}
+              {currentView === 'tracking' && renderTracking()}
+              {currentView === 'drivers' && renderDrivers()}
+              {currentView === 'customers' && renderCustomers()}
+              {currentView === 'invoicing' && renderInvoicing()}
+              {currentView === 'ifta' && renderIFTA()}
+              {currentView === 'settings' && renderSettings()}
+            </div>
+            
+            {/* DEMO FOOTER BANNER - FINAL REMINDER */}
+            <div className="mt-8 pt-6 border-t border-slate-300 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 text-center">
+              <p className="text-sm font-semibold text-slate-900 mb-2">Ready to see this with YOUR real data?</p>
+              <p className="text-xs text-slate-600 mb-4">This demo uses sample information. Sign up or login to see your actual loads, drivers, and customers.</p>
+              <div className="flex items-center justify-center gap-3">
+                <a
+                  href="/?from=demo"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors"
+                >
+                  Sign Up / Login
+                </a>
+                <a
+                  href="mailto:kevin@go4fc.com"
+                  className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-300 transition-colors"
+                >
+                  Contact Sales
+                </a>
+              </div>
+            </div>
           </main>
         </div>
       </div>
