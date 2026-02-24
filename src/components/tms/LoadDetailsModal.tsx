@@ -80,6 +80,8 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
   const [generatingInvoice, setGeneratingInvoice] = useState(false);
   const [sendingInvoiceEmail, setSendingInvoiceEmail] = useState(false);
   const [invoiceEmailResult, setInvoiceEmailResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [showEmailConfirmModal, setShowEmailConfirmModal] = useState(false);
+  const [additionalCcEmails, setAdditionalCcEmails] = useState<string>('');
 
 
   // Track the current load ID to prevent stale async operations
@@ -598,34 +600,37 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
     if (!load) return;
     setSendingInvoiceEmail(true);
     setInvoiceEmailResult(null);
+    setShowEmailConfirmModal(false);
 
     try {
-      const { data, error } = await supabase.functions.invoke('send-invoice-email', {
-        body: { load_id: load.id },
+      const apiUrl = import.meta.env.VITE_API_URL || 'https://loadtracker-pro-2026-production.up.railway.app';
+      
+      // Parse additional CC emails if provided
+      const ccList = additionalCcEmails
+        .split(',')
+        .map(email => email.trim())
+        .filter(email => email && email.includes('@'));
+
+      const response = await fetch(`${apiUrl}/api/send-invoice-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          load_id: load.id,
+          additional_cc: ccList.length > 0 ? ccList : undefined
+        }),
       });
 
-      if (error) {
-        // Network error or unexpected failure — try to extract details from error context
-        let detailedError = 'Failed to send invoice';
-        try {
-          if (error.context && typeof error.context.json === 'function') {
-            const errBody = await error.context.json();
-            detailedError = errBody?.error || error.message || detailedError;
-          } else {
-            detailedError = error.message || detailedError;
-          }
-        } catch {
-          detailedError = error.message || detailedError;
-        }
-        setInvoiceEmailResult({ success: false, message: detailedError });
-      } else if (data?.success) {
+      const data = await response.json();
+
+      if (!response.ok) {
+        setInvoiceEmailResult({ success: false, message: data.error || 'Failed to send invoice' });
+      } else if (data.success) {
         setInvoiceEmailResult({ 
           success: true, 
-          message: data.message || `Invoice sent to ${data.emailed_to}` 
+          message: data.message || `Invoice sent successfully` 
         });
 
-        // ═══ CRITICAL FIX: Update emailed_at in database so pipeline advances ═══
-        // This moves the load from "Invoices To Be Emailed" → "Waiting On Payment"
+        // Update emailed_at in database
         const now = new Date().toISOString();
         const emailedTo = data.emailed_to || '';
         try {
@@ -633,23 +638,27 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
             .from('invoices')
             .update({ emailed_at: now, emailed_to: emailedTo })
             .eq('load_id', load.id);
-          console.log(`[LoadDetails Email] Updated emailed_at for load ${load.id} → ${emailedTo}`);
+          console.log(`[LoadDetails Email] Updated emailed_at for load ${load.id}`);
         } catch (dbErr) {
           console.warn('[LoadDetails Email] Failed to update emailed_at:', dbErr);
         }
 
-        // Update local invoice state with email info
+        // Update local invoice state
         if (invoice) {
           setInvoice({ ...invoice, emailed_at: now, emailed_to: emailedTo });
         }
 
-        // ═══ CRITICAL: Refresh parent data so pipeline updates ═══
+        // Refresh parent data
         if (onLoadUpdated) onLoadUpdated();
+        
+        // Clear additional CC emails
+        setAdditionalCcEmails('');
       } else {
-        setInvoiceEmailResult({ success: false, message: data?.error || 'Failed to send invoice' });
+        setInvoiceEmailResult({ success: false, message: data.error || 'Failed to send invoice' });
       }
     } catch (err: any) {
-      setInvoiceEmailResult({ success: false, message: err.message || 'Failed to send invoice' });
+      console.error('[Email Error]:', err);
+      setInvoiceEmailResult({ success: false, message: err.message || 'Network error - check connection' });
     } finally {
       setSendingInvoiceEmail(false);
     }
@@ -1418,7 +1427,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                         Preview Invoice
                       </button>
                       <button
-                        onClick={handleSendInvoiceEmail}
+                        onClick={() => setShowEmailConfirmModal(true)}
                         disabled={sendingInvoiceEmail}
                         className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
                       >
@@ -1474,6 +1483,99 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
         }}
       />
 
+      {/* Email Confirmation Modal with CC options */}
+      {showEmailConfirmModal && load && invoice && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-slate-200">
+              <h3 className="text-xl font-semibold text-slate-900">Send Invoice Email</h3>
+              <p className="text-sm text-slate-600 mt-1">Review recipients before sending</p>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* To: Field */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">To:</label>
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900">
+                  {load.customer?.email || 'No customer email configured'}
+                </div>
+              </div>
+
+              {/* Default CC: Field */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">CC (default):</label>
+                <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-600">
+                  <div>kevin@go4fc.com</div>
+                  <div>gofarmsbills@gmail.com</div>
+                  <div>esubmit@afs.net</div>
+                </div>
+              </div>
+
+              {/* Additional CC: Field */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Additional CC (optional):
+                </label>
+                <input
+                  type="text"
+                  value={additionalCcEmails}
+                  onChange={(e) => setAdditionalCcEmails(e.target.value)}
+                  placeholder="email1@example.com, email2@example.com"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                />
+                <p className="text-xs text-slate-500 mt-1">Separate multiple emails with commas</p>
+              </div>
+
+              {/* Invoice Details */}
+              <div className="pt-4 border-t border-slate-200">
+                <div className="text-sm text-slate-600 space-y-1">
+                  <div className="flex justify-between">
+                    <span>Invoice #:</span>
+                    <span className="font-medium text-slate-900">{invoice.invoice_number}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Amount:</span>
+                    <span className="font-medium text-slate-900">${invoice.amount?.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Load #:</span>
+                    <span className="font-medium text-slate-900">{load.bol_number}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-200 flex gap-3">
+              <button
+                onClick={() => {
+                  setShowEmailConfirmModal(false);
+                  setAdditionalCcEmails('');
+                }}
+                className="flex-1 px-4 py-2 text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendInvoiceEmail}
+                disabled={sendingInvoiceEmail || !load.customer?.email}
+                className="flex-1 px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+              >
+                {sendingInvoiceEmail ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    Send Email
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </>
   );
