@@ -104,9 +104,14 @@ const LoginPage: React.FC = () => {
           <p className="text-slate-400 mb-4">Transportation Management System</p>
           
           {/* REAL DATA BANNER - Distinguish from demo */}
-          <div className="bg-emerald-500/20 border border-emerald-500/40 rounded-xl px-4 py-3 text-emerald-200 text-sm font-medium">
+          <div className="bg-emerald-500/20 border border-emerald-500/40 rounded-xl px-4 py-3 text-emerald-200 text-sm font-medium mb-6">
             ✅ Real Company Data — Secure Login Required
           </div>
+        </div>
+
+        {/* Login Type Toggle */}
+        <div className="bg-slate-800/50 backdrop-blur-sm rounded-2xl p-1 mb-6 flex">
+          <button
             onClick={() => setLoginType('admin')}
             className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-medium transition-all ${
               loginType === 'admin'
