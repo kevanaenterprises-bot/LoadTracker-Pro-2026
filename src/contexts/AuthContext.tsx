@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { supabase } from '@/lib/supabase';
+import { from as supabaseFrom } from '@/lib/supabaseCompat';
 
 export interface User {
   id: string;
@@ -53,44 +55,42 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 
-        (window.location.hostname === 'localhost' 
-          ? 'http://localhost:3001' 
-          : window.location.origin);
-
-      const response = await fetch(`${API_URL}/api/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          email: email.toLowerCase().trim(), 
-          password 
-        }),
+      // Sign in with Supabase auth
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: email.toLowerCase().trim(),
+        password,
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        return { success: false, error: data.error || 'Login failed' };
+      if (authError) {
+        return { success: false, error: authError.message || 'Login failed' };
       }
 
-      if (!data.success || !data.user) {
-        return { success: false, error: 'Invalid response from server' };
+      if (!authData.user) {
+        return { success: false, error: 'No user data returned' };
       }
 
-      const userData: User = {
-        id: data.user.id,
-        email: data.user.email,
-        role: data.user.role,
-        driver_id: data.user.driver_id,
-        name: data.user.name,
-        is_active: data.user.is_active,
+      // Fetch user role and additional info from users table
+      const { data: userData, error: userError } = await supabaseFrom('users')
+        .select('*')
+        .eq('id', authData.user.id)
+        .single();
+
+      if (userError || !userData) {
+        return { success: false, error: 'Could not fetch user details' };
+      }
+
+      const user: User = {
+        id: userData.id,
+        email: userData.email,
+        role: userData.role || 'driver',
+        driver_id: userData.driver_id,
+        name: userData.name,
+        is_active: userData.is_active !== false,
       };
 
       // Store in localStorage
-      localStorage.setItem('tms_user', JSON.stringify(userData));
-      setUser(userData);
+      localStorage.setItem('tms_user', JSON.stringify(user));
+      setUser(user);
 
       return { success: true };
     } catch (err) {
@@ -106,12 +106,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const resetPassword = async (email: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      // Password reset functionality would need to be implemented separately
-      // For now, return a message indicating this feature is not yet available
-      return { 
-        success: false, 
-        error: 'Password reset functionality is not yet implemented. Please contact your administrator.' 
-      };
+      const { error } = await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim(), {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+
+      if (error) {
+        return { success: false, error: error.message || 'Failed to send reset email' };
+      }
+
+      return { success: true };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to send reset email';
       return { success: false, error: errorMessage };
