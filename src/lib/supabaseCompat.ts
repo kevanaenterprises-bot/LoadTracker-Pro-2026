@@ -1,16 +1,8 @@
-import { query } from './database';
+import { supabase } from './supabase';
 
 /**
- * Helper functions to convert Supabase-style queries to PostgreSQL queries
+ * Direct Supabase client wrapper - queries go directly to Supabase
  */
-
-// API URL for REST endpoints
-// NOTE: In production, this assumes frontend and backend are served from the same origin.
-// If using separate domains (e.g., api.example.com and app.example.com), set VITE_API_URL explicitly.
-const API_URL = import.meta.env.VITE_API_URL || 
-  (typeof window !== 'undefined' && window.location.hostname === 'localhost' 
-    ? 'http://localhost:3001' 
-    : typeof window !== 'undefined' ? window.location.origin : '');
 
 export interface QueryBuilder {
   select(columns?: string): QueryBuilder;
@@ -169,107 +161,128 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
 
   private async execute(): Promise<{ data: any; error: any }> {
     try {
-      let sql = '';
-      const params: any[] = [];
-      let paramIndex = 1;
+      let query = supabase.from(this.table);
 
       if (this.operation === 'select') {
-        sql = `SELECT ${this.selectColumns} FROM ${this.table}`;
+        query = query.select(this.selectColumns);
         
-        if (this.whereConditions.length > 0) {
-          const whereClauses = this.whereConditions.map(cond => {
-            if (cond.operator === 'IN') {
-              const placeholders = cond.value.map((_: any) => `$${paramIndex++}`).join(', ');
-              params.push(...cond.value);
-              return `${cond.column} IN (${placeholders})`;
-            } else if (cond.operator === 'IS' && cond.value === null) {
-              return `${cond.column} IS NULL`;
-            } else {
-              params.push(cond.value);
-              return `${cond.column} ${cond.operator} $${paramIndex++}`;
-            }
-          });
-          sql += ` WHERE ${whereClauses.join(' AND ')}`;
+        for (const cond of this.whereConditions) {
+          switch (cond.operator) {
+            case '=':
+              query = query.eq(cond.column, cond.value);
+              break;
+            case '!=':
+              query = query.neq(cond.column, cond.value);
+              break;
+            case '>':
+              query = query.gt(cond.column, cond.value);
+              break;
+            case '>=':
+              query = query.gte(cond.column, cond.value);
+              break;
+            case '<':
+              query = query.lt(cond.column, cond.value);
+              break;
+            case '<=':
+              query = query.lte(cond.column, cond.value);
+              break;
+            case 'LIKE':
+              query = query.like(cond.column, cond.value);
+              break;
+            case 'ILIKE':
+              query = query.ilike(cond.column, cond.value);
+              break;
+            case 'IS':
+              query = query.is(cond.column, cond.value);
+              break;
+            case 'IN':
+              query = query.in(cond.column, cond.value);
+              break;
+          }
         }
         
-        sql += this.orderByClause + this.limitClause;
+        if (this.orderByClause) {
+          const ascMatch = this.orderByClause.match(/ORDER BY (\w+) (ASC|DESC)/);
+          if (ascMatch) {
+            query = query.order(ascMatch[1], { ascending: ascMatch[2] !== 'DESC' });
+          }
+        }
+        
+        if (this.limitClause) {
+          const limitMatch = this.limitClause.match(/LIMIT (\d+)/);
+          if (limitMatch) {
+            query = query.limit(parseInt(limitMatch[1]));
+          }
+        }
         
       } else if (this.operation === 'insert') {
-        const keys = Object.keys(this.insertData);
-        const values = Object.values(this.insertData);
-        const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
-        
-        sql = `INSERT INTO ${this.table} (${keys.join(', ')}) VALUES (${placeholders})`;
-        params.push(...values);
-        
-        // Add RETURNING clause if select was called
-        if (this.selectCalled) {
-          sql += ` RETURNING ${this.selectColumns}`;
-        }
+        query = (query as any).insert(this.insertData);
         
       } else if (this.operation === 'upsert') {
-        const keys = Object.keys(this.upsertData);
-        const values = Object.values(this.upsertData);
-        const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
-        
-        sql = `INSERT INTO ${this.table} (${keys.join(', ')}) VALUES (${placeholders})`;
-        params.push(...values);
-        
-        // Add ON CONFLICT clause
-        if (this.upsertConflict) {
-          // Validate conflict columns to prevent SQL injection
-          const conflictColumns = this.upsertConflict.split(',').map(col => col.trim());
-          const validColumnPattern = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-          if (!conflictColumns.every(col => validColumnPattern.test(col))) {
-            throw new Error('Invalid conflict column names');
-          }
-          sql += ` ON CONFLICT (${this.upsertConflict}) DO UPDATE SET `;
-          const updateClauses = keys.map(key => `${key} = EXCLUDED.${key}`).join(', ');
-          sql += updateClauses;
-        }
-        
-        sql += ' RETURNING *';
+        query = (query as any).upsert(this.upsertData, { onConflict: this.upsertConflict || undefined });
         
       } else if (this.operation === 'update') {
-        const keys = Object.keys(this.updateData);
-        const setClauses = keys.map(key => {
-          params.push(this.updateData[key]);
-          return `${key} = $${paramIndex++}`;
-        }).join(', ');
-        
-        sql = `UPDATE ${this.table} SET ${setClauses}`;
-        
-        if (this.whereConditions.length > 0) {
-          const whereClauses = this.whereConditions.map(cond => {
-            params.push(cond.value);
-            return `${cond.column} ${cond.operator} $${paramIndex++}`;
-          });
-          sql += ` WHERE ${whereClauses.join(' AND ')}`;
+        query = (query as any).update(this.updateData);
+        for (const cond of this.whereConditions) {
+          switch (cond.operator) {
+            case '=':
+              query = query.eq(cond.column, cond.value);
+              break;
+            case '!=':
+              query = query.neq(cond.column, cond.value);
+              break;
+            case '>':
+              query = query.gt(cond.column, cond.value);
+              break;
+            case '>=':
+              query = query.gte(cond.column, cond.value);
+              break;
+            case '<':
+              query = query.lt(cond.column, cond.value);
+              break;
+            case '<=':
+              query = query.lte(cond.column, cond.value);
+              break;
+          }
         }
-        
-        sql += ' RETURNING *';
         
       } else if (this.operation === 'delete') {
-        sql = `DELETE FROM ${this.table}`;
-        
-        if (this.whereConditions.length > 0) {
-          const whereClauses = this.whereConditions.map(cond => {
-            params.push(cond.value);
-            return `${cond.column} ${cond.operator} $${paramIndex++}`;
-          });
-          sql += ` WHERE ${whereClauses.join(' AND ')}`;
+        query = (query as any).delete();
+        for (const cond of this.whereConditions) {
+          switch (cond.operator) {
+            case '=':
+              query = query.eq(cond.column, cond.value);
+              break;
+            case '!=':
+              query = query.neq(cond.column, cond.value);
+              break;
+            case '>':
+              query = query.gt(cond.column, cond.value);
+              break;
+            case '>=':
+              query = query.gte(cond.column, cond.value);
+              break;
+            case '<':
+              query = query.lt(cond.column, cond.value);
+              break;
+            case '<=':
+              query = query.lte(cond.column, cond.value);
+              break;
+          }
         }
-        
-        sql += ' RETURNING *';
       }
 
-      const result = await query(sql, params);
+      const { data, error } = await query;
       
-      if (this.singleResult) {
-        return { data: result.rows[0] || null, error: null };
+      if (error) {
+        throw error;
       }
       
-      return { data: result.rows, error: null };
+      if (this.singleResult) {
+        return { data: data?.[0] || null, error: null };
+      }
+      
+      return { data, error: null };
     } catch (error: any) {
       console.error('Query execution error:', error);
       return { data: null, error };
@@ -284,152 +297,92 @@ export function from(table: string): QueryBuilder {
   return new PostgreSQLQueryBuilder(table);
 }
 
-// Helper functions for edge function API calls
+// Helper functions for Supabase function calls
 
 async function invokeGeocodeLocation(body: any) {
-  const response = await fetch(`${API_URL}/api/geocode`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      address: body.address,
-      city: body.city,
-      state: body.state,
-      zip: body.zip,
-    }),
+  const { data, error } = await supabase.functions.invoke('geocode-location', {
+    body,
   });
 
-  if (!response.ok) {
-    const error = await response.json();
-    return { data: null, error: { message: error.error || 'Geocoding failed' } };
+  if (error) {
+    return { data: null, error: { message: error.message || 'Geocoding failed' } };
   }
 
-  const data = await response.json();
   return { data, error: null };
 }
 
 async function invokeGeocodeAndSaveLocation(body: any) {
-  const response = await fetch(`${API_URL}/api/geocode-and-save`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      location_id: body.location_id,
-      address: body.address,
-      city: body.city,
-      state: body.state,
-      zip: body.zip,
-      geofence_radius: body.geofence_radius,
-    }),
+  const { data, error } = await supabase.functions.invoke('geocode-and-save-location', {
+    body,
   });
 
-  if (!response.ok) {
-    const error = await response.json();
-    return { data: null, error: { message: error.error || 'Geocoding failed' } };
+  if (error) {
+    return { data: null, error: { message: error.message || 'Geocoding failed' } };
   }
 
-  const data = await response.json();
   return { data, error: null };
 }
 
 async function invokeReverseGeocode(body: any) {
-  const response = await fetch(`${API_URL}/api/reverse-geocode`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      latitude: body.latitude,
-      longitude: body.longitude,
-    }),
+  const { data, error } = await supabase.functions.invoke('reverse-geocode', {
+    body,
   });
 
-  if (!response.ok) {
-    const error = await response.json();
-    return { data: null, error: { message: error.error || 'Reverse geocoding failed' } };
+  if (error) {
+    return { data: null, error: { message: error.message || 'Reverse geocoding failed' } };
   }
 
-  const data = await response.json();
   return { data, error: null };
 }
 
 async function invokeCalculateRoute(body: any) {
-  const response = await fetch(`${API_URL}/api/calculate-route`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      waypoints: body.waypoints,
-    }),
+  const { data, error } = await supabase.functions.invoke('calculate-truck-route', {
+    body,
   });
 
-  if (!response.ok) {
-    const error = await response.json();
-    return { data: null, error: { message: error.error || 'Route calculation failed' } };
+  if (error) {
+    return { data: null, error: { message: error.message || 'Route calculation failed' } };
   }
 
-  const data = await response.json();
   return { data, error: null };
 }
 
 async function invokeGetMapConfig() {
-  const response = await fetch(`${API_URL}/api/here-config`, {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
-  });
+  const { data, error } = await supabase.functions.invoke('get-map-config');
 
-  if (!response.ok) {
-    const error = await response.json();
-    return { data: null, error: { message: error.error || 'Failed to get map config' } };
+  if (error) {
+    return { data: null, error: { message: error.message || 'Failed to get map config' } };
   }
 
-  const data = await response.json();
   return { data, error: null };
 }
 
 // Create a db object that mimics Supabase's interface
 export const db = {
   from,
-  // Stub for realtime functionality (not implemented)
-  channel: (name: string) => {
-    console.warn('Realtime channels not implemented in PostgreSQL migration');
-    return {
-      on: () => ({ subscribe: () => {} }),
-      subscribe: () => {},
-    };
-  },
-  removeChannel: () => {
-    console.warn('Realtime channels not implemented in PostgreSQL migration');
-  },
-  // Edge Functions - now calls REST API endpoints on Express server
+  // Supabase realtime client
+  channel: (name: string) => supabase.channel(name),
+  removeChannel: (channel: any) => supabase.removeChannel(channel),
+  // Edge Functions - invokes Supabase edge functions
   functions: {
     invoke: async (functionName: string, options?: any) => {
-      // Map edge function names to REST API endpoints
       const body = options?.body || {};
-      const action = body.action;
-
+      
       try {
-        // Route based on action parameter
-        switch (action) {
-          case 'geocode-location':
-            return await invokeGeocodeLocation(body);
-          
-          case 'geocode-and-save-location':
-            return await invokeGeocodeAndSaveLocation(body);
-          
-          case 'reverse-geocode':
-            return await invokeReverseGeocode(body);
-          
-          case 'calculate-truck-route':
-          case 'calculate-route':
-          case 'get-route-for-load':
-            return await invokeCalculateRoute(body);
-          
-          case 'get-map-config':
-            return await invokeGetMapConfig();
-          
-          default:
-            console.warn(`Edge function action '${action}' not implemented`);
-            return { 
-              data: null, 
-              error: { message: `Action '${action}' not implemented` } 
-            };
+        // Invoke Supabase edge function directly
+        const { data, error } = await supabase.functions.invoke(functionName, {
+          body,
+        });
+
+        if (error) {
+          console.error(`Edge function '${functionName}' error:`, error);
+          return { 
+            data: null, 
+            error: { message: error.message || 'Function invocation failed' } 
+          };
         }
+
+        return { data, error: null };
       } catch (error: any) {
         console.error(`Edge function '${functionName}' error:`, error);
         return { 
@@ -439,17 +392,6 @@ export const db = {
       }
     },
   },
-  // Stub for storage (not implemented)
-  storage: {
-    from: (bucket: string) => ({
-      upload: async () => {
-        console.warn(`Storage upload to bucket '${bucket}' not implemented`);
-        return { data: null, error: { message: 'Storage not implemented' } };
-      },
-      remove: async () => {
-        console.warn(`Storage removal from bucket '${bucket}' not implemented`);
-        return { data: null, error: { message: 'Storage not implemented' } };
-      },
-    }),
-  },
+  // Storage - uses Supabase storage
+  storage: supabase.storage,
 };
