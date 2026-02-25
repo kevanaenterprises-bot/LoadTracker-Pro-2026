@@ -15,6 +15,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  signup: (email: string, password: string, name: string, role: 'admin' | 'driver') => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
   isAdmin: boolean;
@@ -99,6 +100,58 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  const signup = async (email: string, password: string, name: string, role: 'admin' | 'driver' = 'driver'): Promise<{ success: boolean; error?: string }> => {
+    try {
+      // Create user in Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: email.toLowerCase().trim(),
+        password,
+      });
+
+      if (authError) {
+        return { success: false, error: authError.message || 'Signup failed' };
+      }
+
+      if (!authData.user) {
+        return { success: false, error: 'No user data returned' };
+      }
+
+      // Create user record in users table
+      const { error: insertError } = await supabaseFrom('users').insert({
+        id: authData.user.id,
+        email: email.toLowerCase().trim(),
+        name: name,
+        role: role,
+        is_active: true,
+        created_at: new Date().toISOString(),
+      });
+
+      if (insertError) {
+        console.error('Error creating user record:', insertError);
+        // Auth user is created but table record failed - user can still try to login
+        return { success: false, error: 'Account created but profile setup failed. Please contact support.' };
+      }
+
+      // Auto-login after signup
+      const user: User = {
+        id: authData.user.id,
+        email: email.toLowerCase().trim(),
+        role: role,
+        driver_id: null,
+        name: name,
+        is_active: true,
+      };
+
+      localStorage.setItem('tms_user', JSON.stringify(user));
+      setUser(user);
+
+      return { success: true };
+    } catch (err) {
+      console.error('Signup error:', err);
+      return { success: false, error: 'An unexpected error occurred' };
+    }
+  };
+
   const logout = () => {
     localStorage.removeItem('tms_user');
     setUser(null);
@@ -125,6 +178,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     user,
     loading,
     login,
+    signup,
     logout,
     resetPassword,
     isAdmin: user?.role === 'admin',

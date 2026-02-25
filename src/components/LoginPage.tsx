@@ -3,13 +3,15 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Truck, Mail, Lock, Loader2, AlertCircle, User, Shield, ArrowLeft, CheckCircle } from 'lucide-react';
 
 const LoginPage: React.FC = () => {
-  const { login, resetPassword } = useAuth();
+  const { login, signup, resetPassword } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [loginType, setLoginType] = useState<'admin' | 'driver'>('admin');
   const [showResetPassword, setShowResetPassword] = useState(false);
+  const [showSignup, setShowSignup] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const [resetSuccess, setResetSuccess] = useState(false);
   const [resetError, setResetError] = useState('');
@@ -47,10 +49,28 @@ const LoginPage: React.FC = () => {
 
   const handleBackToLogin = () => {
     setShowResetPassword(false);
+    setShowSignup(false);
     setResetEmail('');
     setResetSuccess(false);
     setResetError('');
     setError('');
+    setEmail('');
+    setPassword('');
+    setName('');
+  };
+
+  const handleSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    const result = await signup(email, password, name, loginType);
+    
+    if (!result.success) {
+      setError(result.error || 'Signup failed');
+    }
+    
+    setLoading(false);
   };
 
   return (
@@ -206,6 +226,110 @@ const LoginPage: React.FC = () => {
                 )}
               </form>
             </>
+          ) : showSignup ? (
+            // Signup Form
+            <>
+              <div className="mb-6">
+                <button
+                  onClick={handleBackToLogin}
+                  className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  Back to Login
+                </button>
+              </div>
+
+              <h2 className="text-xl font-semibold text-white mb-2">
+                Create Your Account
+              </h2>
+              <p className="text-slate-400 text-sm mb-6">
+                Register as {loginType === 'admin' ? 'an Administrator' : 'a Driver'}
+              </p>
+
+              {error && (
+                <div className="mb-6 p-4 bg-red-500/20 border border-red-500/30 rounded-xl flex items-center gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
+                  <p className="text-red-200 text-sm">{error}</p>
+                </div>
+              )}
+
+              <form onSubmit={handleSignup} className="space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Full Name
+                  </label>
+                  <div className="relative">
+                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="John Doe"
+                      className="w-full pl-12 pr-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Email Address
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder={loginType === 'admin' ? 'you@company.com' : 'driver@company.com'}
+                      className="w-full pl-12 pr-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Create a strong password"
+                      className="w-full pl-12 pr-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      required
+                      minLength={6}
+                    />
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">Password must be at least 6 characters</p>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className={`w-full py-4 rounded-xl font-semibold text-white transition-all flex items-center justify-center gap-2 ${
+                    loginType === 'admin'
+                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-500/30'
+                      : 'bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 shadow-lg shadow-emerald-500/30'
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Creating Account...
+                    </>
+                  ) : (
+                    <>
+                      <User className="w-5 h-5" />
+                      Create Account
+                    </>
+                  )}
+                </button>
+              </form>
+            </>
           ) : (
             // Login Form
             <>
@@ -295,19 +419,34 @@ const LoginPage: React.FC = () => {
           )}
 
           {/* Help text */}
-          {!showResetPassword && (
+          {!showResetPassword && !showSignup && (
             <div className="mt-6 pt-6 border-t border-slate-700/50">
+              <div className="text-center mb-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSignup(true);
+                    setError('');
+                    setEmail('');
+                    setPassword('');
+                    setName('');
+                  }}
+                  className="text-sm text-blue-400 hover:text-blue-300 transition-colors font-medium"
+                >
+                  Don't have an account? Create one now &rarr;
+                </button>
+              </div>
               <p className="text-xs text-slate-500 text-center">
                 {loginType === 'admin' 
-                  ? 'Contact your administrator if you need access credentials.' 
-                  : 'Your login credentials are provided by your dispatcher.'}
+                  ? 'Create an admin account to manage your fleet operations.' 
+                  : 'Create a driver account to access your portal.'}
               </p>
               <div className="mt-4 text-center">
                 <a
                   href="/demo"
-                  className="text-sm text-blue-400 hover:text-blue-300 transition-colors font-medium"
+                  className="text-sm text-emerald-400 hover:text-emerald-300 transition-colors font-medium"
                 >
-                  New here? See what LoadTracker PRO can do for your fleet &rarr;
+                  New here? See what LoadTracker PRO can do &rarr;
                 </a>
               </div>
             </div>
