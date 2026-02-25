@@ -620,6 +620,7 @@ const AppLayout: React.FC = () => {
               <p className="text-xs text-slate-500 mt-2">of {drivers.length} total drivers</p>
             </div>
           </div>
+        </div>
         </aside>
       </div>
 
