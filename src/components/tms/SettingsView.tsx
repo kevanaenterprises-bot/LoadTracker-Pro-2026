@@ -35,13 +35,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
 
-  // Resend email settings
-  const [resendFromEmail, setResendFromEmail] = useState('');
-  const [savingFromEmail, setSavingFromEmail] = useState(false);
-  const [fromEmailSaved, setFromEmailSaved] = useState(false);
-  const [testEmailAddress, setTestEmailAddress] = useState('');
-  const [sendingTestEmail, setSendingTestEmail] = useState(false);
-  const [testEmailResult, setTestEmailResult] = useState<{ success: boolean; message: string } | null>(null);
 
   const webhookUrl = `${window.location.origin.includes('localhost') ? 'https://tlksfrowyjprvjerydrp.db.co' : ''}/functions/v1/here-webhook`;
 
@@ -55,13 +48,12 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
       const { data } = await db
         .from('settings')
         .select('key, value')
-        .in('key', ['auto_invoice_enabled', 'invoice_notification_email', 'resend_from_email']);
+        .in('key', ['auto_invoice_enabled', 'invoice_notification_email']);
 
       if (data) {
         data.forEach(s => {
           if (s.key === 'auto_invoice_enabled') setAutoInvoiceEnabled(s.value === 'true');
           if (s.key === 'invoice_notification_email') setInvoiceNotificationEmail(s.value || 'kevin@go4fc.com');
-          if (s.key === 'resend_from_email') setResendFromEmail(s.value || '');
         });
       }
     } catch (err) {
@@ -100,63 +92,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     }
   };
 
-  const handleSaveFromEmail = async () => {
-    setSavingFromEmail(true);
-    setFromEmailSaved(false);
-    try {
-      await db
-        .from('settings')
-        .upsert({ key: 'resend_from_email', value: resendFromEmail.trim() }, { onConflict: 'key' });
-      setFromEmailSaved(true);
-      setTimeout(() => setFromEmailSaved(false), 3000);
-    } catch (err) {
-      console.error('Failed to save from email:', err);
-      alert('Failed to save. Please try again.');
-    } finally {
-      setSavingFromEmail(false);
-    }
-  };
-
-  const handleSendTestEmail = async () => {
-    if (!testEmailAddress) {
-      setTestEmailResult({ success: false, message: 'Please enter a test email address' });
-      return;
-    }
-    setSendingTestEmail(true);
-    setTestEmailResult(null);
-
-    try {
-      // Call new backend API instead of Supabase Edge Function
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-      const response = await fetch(`${API_URL}/api/send-invoice-email`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ load_id: '__test__', test_email: testEmailAddress }),
-      });
-      const data = await response.json();
-      const error = response.ok ? null : { message: data.error || 'Test failed' };
-
-      if (error) {
-        setTestEmailResult({ 
-          success: false, 
-          message: data?.error || error.message || 'Test failed - check configuration' 
-        });
-      } else if (data?.success) {
-        let msg = data.message || `Test email sent to ${testEmailAddress}!`;
-        if (data.warning) msg += ` (${data.warning})`;
-        setTestEmailResult({ success: true, message: msg });
-      } else {
-        setTestEmailResult({ 
-          success: false, 
-          message: data?.error || 'Test failed - check your Resend API key and domain configuration' 
-        });
-      }
-    } catch (err: any) {
-      setTestEmailResult({ success: false, message: err.message || 'Failed to test email configuration' });
-    } finally {
-      setSendingTestEmail(false);
-    }
-  };
 
 
   const fetchGeofenceStats = async () => {
@@ -234,172 +169,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
       </header>
 
       <main className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto space-y-6">
-
-        {/* Resend Email Delivery Settings */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="px-6 py-4 bg-gradient-to-r from-blue-600 to-cyan-600">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-white/20 rounded-lg">
-                <Mail className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-white">Email Delivery (Resend)</h3>
-                <p className="text-blue-200 text-sm">Send invoices directly to customer inboxes</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-6 space-y-6">
-            {/* Status */}
-            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3">
-              <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <h4 className="font-medium text-emerald-800">Resend API Configured</h4>
-                <p className="text-sm text-emerald-700 mt-1">
-                  Invoice emails will be delivered via <a href="https://resend.com" target="_blank" rel="noopener noreferrer" className="font-medium underline hover:text-emerald-900">Resend</a>. 
-                  Emails include the full HTML invoice with POD document links.
-                </p>
-              </div>
-            </div>
-
-            {/* How it works */}
-            <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
-              <div className="flex items-start gap-3">
-                <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="font-medium text-blue-800 mb-2">Invoice Email Includes:</h4>
-                  <ul className="text-sm text-blue-700 space-y-1 list-disc list-inside">
-                    <li>Professional HTML invoice with company branding</li>
-                    <li>Invoice number, load number, BOL/POD reference</li>
-                    <li>Bill-to customer details and billing address</li>
-                    <li>Pickup and delivery route information</li>
-                    <li>Line items with total amount due</li>
-                    <li><strong>POD document links</strong> - clickable View/Download buttons for each uploaded POD</li>
-                    <li>Payment terms and company contact info</li>
-                    <li>CC to notification email (if configured below)</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-
-            {/* From Email Address */}
-            <div className="pt-4 border-t border-slate-200">
-              <h4 className="font-medium text-slate-800 mb-2 flex items-center gap-2">
-                <AtSign className="w-5 h-5 text-slate-600" />
-                Sender Email Address (From)
-              </h4>
-              <p className="text-sm text-slate-500 mb-3">
-                The email address invoices will be sent from. This must be from a domain verified in your{' '}
-                <a href="https://resend.com/domains" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline inline-flex items-center gap-1">
-                  Resend dashboard <ExternalLink className="w-3 h-3" />
-                </a>. 
-                Leave blank to use your company email from Company Settings, or <code className="bg-slate-100 px-1.5 py-0.5 rounded text-xs font-mono">onboarding@resend.dev</code> as a fallback for testing.
-              </p>
-              <div className="flex gap-3">
-                <input
-                  type="email"
-                  value={resendFromEmail}
-                  onChange={(e) => setResendFromEmail(e.target.value)}
-                  placeholder="invoices@yourdomain.com (or leave blank for default)"
-                  className="flex-1 px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                />
-                <button
-                  onClick={handleSaveFromEmail}
-                  disabled={savingFromEmail}
-                  className={`px-6 py-3 rounded-xl font-medium transition-colors flex items-center gap-2 ${
-                    fromEmailSaved 
-                      ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                      : 'bg-blue-600 text-white hover:bg-blue-700'
-                  } disabled:opacity-50`}
-                >
-                  {savingFromEmail ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : fromEmailSaved ? (
-                    <><CheckCircle className="w-5 h-5" />Saved</>
-                  ) : (
-                    'Save'
-                  )}
-                </button>
-              </div>
-              {!resendFromEmail && (
-                <p className="mt-2 text-xs text-amber-600 flex items-center gap-1">
-                  <AlertCircle className="w-3.5 h-3.5" />
-                  No custom from address set. Will use company email or fall back to onboarding@resend.dev for testing.
-                </p>
-              )}
-            </div>
-
-            {/* Domain Setup Guide */}
-            <div className="pt-4 border-t border-slate-200">
-              <h4 className="font-medium text-slate-800 mb-3 flex items-center gap-2">
-                <Globe className="w-5 h-5 text-slate-600" />
-                Domain Verification
-              </h4>
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-                <p className="text-sm text-slate-600 mb-3">
-                  To send emails from your own domain (e.g., <code className="bg-white px-1.5 py-0.5 rounded text-xs font-mono border">invoices@go4fc.com</code>), you need to verify your domain in Resend:
-                </p>
-                <ol className="text-sm text-slate-600 space-y-2 list-decimal list-inside">
-                  <li>Go to <a href="https://resend.com/domains" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline font-medium">resend.com/domains</a></li>
-                  <li>Click "Add Domain" and enter your domain (e.g., go4fc.com)</li>
-                  <li>Add the DNS records (MX, SPF, DKIM) to your domain provider</li>
-                  <li>Wait for verification (usually a few minutes)</li>
-                  <li>Enter your verified email address in the "Sender Email" field above</li>
-                </ol>
-                <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                  <p className="text-xs text-amber-700 flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                    <span>
-                      Until your domain is verified, emails will be sent from <code className="bg-white px-1 py-0.5 rounded font-mono">onboarding@resend.dev</code> (Resend's test sender). 
-                      The customer will still receive the invoice, but it may land in spam. Verify your domain for reliable delivery.
-                    </span>
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Test Email */}
-            <div className="pt-4 border-t border-slate-200">
-              <h4 className="font-medium text-slate-800 mb-4 flex items-center gap-2">
-                <TestTube className="w-5 h-5 text-slate-600" />
-                Send Test Email
-              </h4>
-              <p className="text-sm text-slate-500 mb-3">
-                Send a test email to verify your Resend configuration is working. A confirmation email will be delivered to the address below.
-              </p>
-              <div className="flex gap-3">
-
-                <div className="flex-1 relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                  <input
-                    type="email"
-                    value={testEmailAddress}
-                    onChange={(e) => setTestEmailAddress(e.target.value)}
-                    placeholder="Enter test email address"
-                    className="w-full pl-10 pr-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                  />
-                </div>
-                <button
-                  onClick={handleSendTestEmail}
-                  disabled={sendingTestEmail || !testEmailAddress}
-                  className="px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  {sendingTestEmail ? (
-                    <><Loader2 className="w-5 h-5 animate-spin" />Testing...</>
-                  ) : (
-                    <><Send className="w-5 h-5" />Test Config</>
-                  )}
-                </button>
-              </div>
-              {testEmailResult && (
-                <div className={`mt-4 p-4 rounded-xl flex items-start gap-3 ${testEmailResult.success ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-red-50 border border-red-200 text-red-700'}`}>
-                  {testEmailResult.success ? <CheckCircle className="w-5 h-5 flex-shrink-0 mt-0.5" /> : <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />}
-                  <p className="text-sm">{testEmailResult.message}</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
 
         {/* Auto-Invoice Settings */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">

@@ -4,7 +4,7 @@ import { Load, Invoice, Payment, Customer, PODDocument } from '@/types/tms';
 import {
   ArrowLeft, DollarSign, Search, Loader2, Clock, AlertTriangle,
   AlertCircle, FileText, ChevronDown, ChevronRight, CreditCard, Download,
-  ImageOff, Eye, RotateCcw, CheckCircle, Trash2
+  ImageOff, Eye, RotateCcw, CheckCircle, Trash2, X, FileArchive
 } from 'lucide-react';
 import InvoicePreviewModal from './InvoicePreviewModal';
 
@@ -60,6 +60,10 @@ const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack,
   // Re-upload state
   const [reuploadingLoadId, setReuploadingLoadId] = useState<string | null>(null);
   const [reuploadResult, setReuploadResult] = useState<{ loadId: string; success: boolean; message: string } | null>(null);
+
+  // Attachments modal state
+  const [showAttachmentsModal, setShowAttachmentsModal] = useState(false);
+  const [selectedAttachmentItem, setSelectedAttachmentItem] = useState<ARInvoice | null>(null);
 
   useEffect(() => {
     fetchARData();
@@ -594,6 +598,21 @@ const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack,
                                       <Eye className="w-3.5 h-3.5" />
                                     </button>
 
+                                    {/* View Attachments */}
+                                    {item.podDocuments.length > 0 && (
+                                      <button
+                                        onClick={() => {
+                                          setSelectedAttachmentItem(item);
+                                          setShowAttachmentsModal(true);
+                                        }}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-blue-700 bg-blue-50 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 transition-colors"
+                                        title="View Attachments Sent"
+                                      >
+                                        <FileArchive className="w-3.5 h-3.5" />
+                                        <span className="hidden lg:inline">{item.podDocuments.length}</span>
+                                      </button>
+                                    )}
+
                                     {/* Re-upload POD (only shown for broken PODs) */}
                                     {hasBrokenPods && (
                                       <button
@@ -643,6 +662,74 @@ const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack,
         onClose={handlePreviewClosed}
         onPodReuploadRequested={handlePodReuploadFromPreview}
       />
+
+      {/* Attachments Modal */}
+      {showAttachmentsModal && selectedAttachmentItem && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-bold text-slate-800">Attachments Sent with Invoice</h3>
+                <p className="text-sm text-slate-600 mt-1">
+                  Invoice #{selectedAttachmentItem.invoice.invoice_number} | Load #{selectedAttachmentItem.load.load_number}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowAttachmentsModal(false);
+                  setSelectedAttachmentItem(null);
+                }}
+                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-slate-400" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-1 gap-3">
+                {selectedAttachmentItem.podDocuments.map((doc) => (
+                  <a
+                    key={doc.id}
+                    href={doc.file_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-between p-4 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <FileArchive className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-800 truncate">{doc.file_name}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Uploaded {new Date(doc.uploaded_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                      <Download className="w-4 h-4 text-slate-400 group-hover:text-blue-600 transition-colors" />
+                    </div>
+                  </a>
+                ))}
+              </div>
+
+              {selectedAttachmentItem.podDocuments.length === 0 && (
+                <div className="text-center py-8">
+                  <FileArchive className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                  <p className="text-slate-500">No attachments found</p>
+                </div>
+              )}
+
+              <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-xs text-blue-700">
+                  <strong>Note:</strong> These are the POD documents that were combined and sent with the invoice email.
+                  {selectedAttachmentItem.podDocuments.length > 0 && ` Total: ${selectedAttachmentItem.podDocuments.length} file(s).`}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

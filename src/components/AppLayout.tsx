@@ -3,7 +3,7 @@ import { db } from '@/lib/supabaseCompat';
 import { generateNextInvoiceNumber } from '@/lib/invoiceUtils';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { useUsage, TIER_LIMITS, FEATURE_LABELS, FeatureKey } from '@/contexts/UsageContext';
+import { useUsage } from '@/contexts/UsageContext';
 import { Load, Driver, Customer, LoadStatus, PaymentStatus } from '@/types/tms';
 
 import LoadCard from './tms/LoadCard';
@@ -31,7 +31,7 @@ import {
   Truck, Plus, Package, Clock, DollarSign, Fuel,
   FileText, Users, TrendingUp, RefreshCw, Menu, X,
   LayoutDashboard, Archive, Settings, Building2, MapPin, LogOut, Radar, Receipt, ShieldCheck,
-  Crown, Brain, Zap, MessageSquare, ChevronDown, ChevronRight, Send, CheckCircle2, AlertCircle
+  ChevronDown, ChevronRight, Send, CheckCircle2, AlertCircle
 } from 'lucide-react';
 
 
@@ -46,11 +46,12 @@ interface PaymentInfo {
   totalPaid: number;
   invoiceAmount: number;
   status: PaymentStatus;
+  invoiceNumber?: string | null;
 }
 
 const AppLayout: React.FC = () => {
   const { user, logout } = useAuth();
-  const { tier, usage, limits, canUseFeature, incrementUsage, checkAndPromptUpgrade, getUsagePercent, getRemainingUses } = useUsage();
+  const { incrementUsage, checkAndPromptUpgrade } = useUsage();
 
   
   const [loads, setLoads] = useState<Load[]>([]);
@@ -220,7 +221,7 @@ const AppLayout: React.FC = () => {
         status = 'partial';
       }
 
-      paymentMap[load.id] = { totalPaid, invoiceAmount, status };
+      paymentMap[load.id] = { totalPaid, invoiceAmount, status, invoiceNumber: invoice.invoice_number };
     }
 
     setPaymentData(paymentMap);
@@ -526,8 +527,13 @@ const AppLayout: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-100 flex">
       {/* Sidebar */}
-      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 transform transition-transform duration-300 lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="flex flex-col h-full">
+      <div
+        className={`fixed inset-y-0 left-0 z-50 overflow-hidden transition-[width] duration-300 ${
+          sidebarOpen ? 'w-64' : 'w-0 lg:w-3 lg:hover:w-64'
+        }`}
+      >
+        <aside className="h-full w-64 bg-slate-900">
+          <div className="flex flex-col h-full">
           <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-800">
             <div className="p-2 bg-blue-600 rounded-lg">
               <Truck className="w-6 h-6 text-white" />
@@ -591,54 +597,6 @@ const AppLayout: React.FC = () => {
           </nav>
 
           <div className="px-4 py-4 border-t border-slate-800">
-            {/* Usage / Tier Meter */}
-            {tier === 'free' && (
-              <div className="bg-gradient-to-br from-amber-900/40 to-orange-900/40 border border-amber-700/50 rounded-xl p-3 mb-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Crown className="w-4 h-4 text-amber-400" />
-                  <span className="text-xs font-bold text-amber-300 uppercase tracking-wider">Starter Plan</span>
-                </div>
-                <p className="text-[9px] text-slate-500 mb-2">Monthly usage resets on the 1st</p>
-                {([
-                  { key: 'loads_created' as FeatureKey, label: 'Loads', icon: <Package className="w-3 h-3" /> },
-                  { key: 'ai_dispatch_calls' as FeatureKey, label: 'AI Advisor', icon: <Brain className="w-3 h-3" /> },
-                  { key: 'invoices_generated' as FeatureKey, label: 'Invoices', icon: <Receipt className="w-3 h-3" /> },
-                  { key: 'sms_sent' as FeatureKey, label: 'SMS', icon: <MessageSquare className="w-3 h-3" /> },
-                ]).map(item => {
-                  const used = usage[item.key] || 0;
-                  const limit = TIER_LIMITS.free[item.key];
-                  const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
-                  return (
-                    <div key={item.key} className="mb-1.5 last:mb-0">
-                      <div className="flex items-center justify-between text-[10px] mb-0.5">
-                        <span className="text-slate-400 flex items-center gap-1">{item.icon}{item.label}</span>
-                        <span className={`font-semibold ${pct >= 100 ? 'text-red-400' : pct >= 80 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                          {used} / {limit} used
-                        </span>
-                      </div>
-                      <div className="w-full bg-slate-700 rounded-full h-1">
-                        <div className={`h-1 rounded-full transition-all ${pct >= 100 ? 'bg-red-500' : pct >= 80 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(100, pct)}%` }} />
-                      </div>
-                    </div>
-                  );
-                })}
-                <a
-                  href="mailto:kevin@go4fc.com?subject=Upgrade to LoadTracker PRO"
-                  className="flex items-center justify-center gap-1.5 mt-2.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-bold rounded-lg hover:from-amber-600 hover:to-orange-600 transition-all"
-                >
-                  <Zap className="w-3 h-3" />Go Pro — $300/mo Unlimited
-                </a>
-              </div>
-            )}
-            {tier === 'standard' && (
-              <div className="bg-gradient-to-br from-emerald-900/30 to-blue-900/30 border border-emerald-700/40 rounded-xl p-3 mb-4">
-                <div className="flex items-center gap-2">
-                  <Crown className="w-4 h-4 text-emerald-400" />
-                  <span className="text-xs font-bold text-emerald-300 uppercase tracking-wider">Pro Plan</span>
-                </div>
-                <p className="text-[10px] text-slate-500 mt-1">Unlimited access to all features</p>
-              </div>
-            )}
             {user && (
               <div className="mb-4">
                 <p className="text-sm text-slate-400 truncate">{user.name}</p>
@@ -662,12 +620,12 @@ const AppLayout: React.FC = () => {
               <p className="text-xs text-slate-500 mt-2">of {drivers.length} total drivers</p>
             </div>
           </div>
-        </div>
-      </aside>
+        </aside>
+      </div>
 
 
       {/* Main Content */}
-      <div className="flex-1 lg:ml-64">
+      <div className="flex-1">
         <header className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm">
           <div className="flex items-center justify-between px-4 sm:px-6 lg:px-8 py-4">
             <div className="flex items-center gap-4">
@@ -892,6 +850,7 @@ const AppLayout: React.FC = () => {
                                   paymentStatus={pInfo?.status}
                                   totalPaid={pInfo?.totalPaid}
                                   invoiceAmount={pInfo?.invoiceAmount}
+                                  invoiceNumber={pInfo?.invoiceNumber}
                                 />
                               );
                             })}

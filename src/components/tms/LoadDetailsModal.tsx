@@ -62,6 +62,7 @@ const statusLabels: Record<string, string> = {
 const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClose, onEdit, onDelete, onLoadUpdated, onAssignDriver }) => {
   const [documents, setDocuments] = useState<PODDocument[]>([]);
   const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [customer, setCustomer] = useState<Customer | null>(null);
   const [stops, setStops] = useState<LoadStop[]>([]);
   const [loading, setLoading] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -120,6 +121,24 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
     if (!load) return;
     const loadId = load.id;
     setLoading(true);
+
+    if (load.customer) {
+      setCustomer(load.customer);
+    }
+
+    // Fetch customer if load has customer_id (needed for email button to enable)
+    if (load.customer_id) {
+      const { data: cust } = await db
+        .from('customers')
+        .select('*')
+        .eq('id', load.customer_id)
+        .single();
+      
+      if (currentLoadIdRef.current !== loadId) return;
+      if (cust) {
+        setCustomer(cust);
+      }
+    }
 
     // Fetch POD documents
     const { data: docs } = await db
@@ -675,6 +694,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
   const activeGeofences = geofences.filter(g => g.status === 'active');
   const canUnassign = load.driver_id && ['DISPATCHED', 'IN_TRANSIT'].includes(load.status);
   const canReassign = load.driver_id && ['DISPATCHED', 'IN_TRANSIT'].includes(load.status);
+  const customerEmail = (customer?.email || '').trim();
 
   // Calculate how many stops have geocoded locations
   const geocodedStopCount = stops.filter(s => locationGeofenceStatus[s.id]).length;
@@ -1520,7 +1540,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">To:</label>
                 <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900">
-                  {load.customer?.email || 'No customer email configured'}
+                  {customerEmail || 'No customer email configured'}
                 </div>
               </div>
 
@@ -1530,7 +1550,6 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                 <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-600">
                   <div>kevin@go4fc.com</div>
                   <div>gofarmsbills@gmail.com</div>
-                  <div>esubmit@afs.net</div>
                 </div>
               </div>
 
@@ -1564,6 +1583,14 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                     <span>Load #:</span>
                     <span className="font-medium text-slate-900">{load.bol_number}</span>
                   </div>
+                  <div className="flex justify-between">
+                    <span>Attachments:</span>
+                    <span className="font-medium text-slate-900">
+                      {documents.length > 0 
+                        ? `1 file (Invoice + ${documents.length} POD${documents.length !== 1 ? 's' : ''} combined)` 
+                        : '1 file (Invoice only)'}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1580,7 +1607,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
               </button>
               <button
                 onClick={handleSendInvoiceEmail}
-                disabled={sendingInvoiceEmail || !load.customer?.email}
+                disabled={sendingInvoiceEmail || !customerEmail}
                 className="flex-1 px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
               >
                 {sendingInvoiceEmail ? (

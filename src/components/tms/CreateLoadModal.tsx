@@ -92,9 +92,9 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
 
   useEffect(() => {
     if (isOpen) {
+      resetForm();
       fetchCustomers();
       fetchLocations();
-      setErrorMessage('');
     }
   }, [isOpen]);
 
@@ -313,15 +313,17 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
       origin_address: firstPickup.address,
       origin_city: firstPickup.city,
       origin_state: firstPickup.state,
+      origin_zip: firstPickup.zip || null,
       dest_company: firstDelivery.company_name,
       dest_address: firstDelivery.address,
       dest_city: firstDelivery.city,
       dest_state: firstDelivery.state,
-      pickup_date: formData.pickup_date,
-      delivery_date: formData.delivery_date,
-      cargo_description: formData.cargo_description,
-      weight: parseFloat(formData.weight) || null,
-      rate: finalRate,
+      dest_zip: firstDelivery.zip || null,
+      pickup_date: formData.pickup_date || null,
+      delivery_date: formData.delivery_date || null,
+      cargo_description: formData.cargo_description || null,
+      weight: formData.weight ? parseFloat(formData.weight) : null,
+      rate: finalRate || 0,
       status: 'UNASSIGNED',
     };
   };
@@ -330,57 +332,97 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
   const insertLoad = async () => {
     const payload = buildLoadPayload();
 
-    const { data: loadData, error: loadError } = await db.from('loads').insert(payload).select().single();
-    if (loadError) throw loadError;
+    try {
+      console.log('Attempting to insert load with payload:', payload);
+      
+      // Step 1: Insert the load
+      const { error: insertError } = await db.from('loads').insert(payload);
+      
+      if (insertError) {
+        console.error('Database insert error details:', {
+          message: insertError.message,
+          code: insertError.code,
+          details: insertError.details,
+          hint: insertError.hint,
+        });
+        throw new Error(`Database error: ${insertError.message}${insertError.details ? ' - ' + insertError.details : ''}`);
+      }
+      
+      // Step 2: Fetch back the inserted load using a query
+      console.log('Load inserted successfully, fetching back...');
+      const { data: loadData, error: fetchError } = await db
+        .from('loads')
+        .select()
+        .eq('load_number', payload.load_number)
+        .single();
+      
+      if (fetchError) {
+        console.error('Failed to fetch inserted load:', fetchError);
+        throw new Error(`Failed to retrieve inserted load: ${fetchError.message}`);
+      }
+      
+      if (!loadData) {
+        console.error('Fetch returned no data for load_number:', payload.load_number);
+        throw new Error('Load was inserted but could not be retrieved from database');
+      }
+      
+      console.log('Load inserted and retrieved successfully:', loadData);
 
-    // Insert all stops
-    const stopsToInsert = [
-      ...pickupStops.map((stop, index) => ({
-        load_id: loadData.id,
-        location_id: stop.location_id || null,
-        stop_type: 'pickup',
-        stop_sequence: index + 1,
-        company_name: stop.company_name,
-        address: stop.address,
-        city: stop.city,
-        state: stop.state,
-        zip: stop.zip,
-        contact_name: stop.contact_name,
-        contact_phone: stop.contact_phone,
-        instructions: stop.instructions,
-      })),
-      ...deliveryStops.map((stop, index) => ({
-        load_id: loadData.id,
-        location_id: stop.location_id || null,
-        stop_type: 'delivery',
-        stop_sequence: index + 1,
-        company_name: stop.company_name,
-        address: stop.address,
-        city: stop.city,
-        state: stop.state,
-        zip: stop.zip,
-        contact_name: stop.contact_name,
-        contact_phone: stop.contact_phone,
-        instructions: stop.instructions,
-      })),
-    ];
+      // Insert all stops
+      const stopsToInsert = [
+        ...pickupStops.map((stop, index) => ({
+          load_id: loadData.id,
+          location_id: stop.location_id || null,
+          stop_type: 'pickup',
+          stop_sequence: index + 1,
+          company_name: stop.company_name,
+          address: stop.address,
+          city: stop.city,
+          state: stop.state,
+          zip: stop.zip,
+          contact_name: stop.contact_name,
+          contact_phone: stop.contact_phone,
+          instructions: stop.instructions,
+        })),
+        ...deliveryStops.map((stop, index) => ({
+          load_id: loadData.id,
+          location_id: stop.location_id || null,
+          stop_type: 'delivery',
+          stop_sequence: index + 1,
+          company_name: stop.company_name,
+          address: stop.address,
+          city: stop.city,
+          state: stop.state,
+          zip: stop.zip,
+          contact_name: stop.contact_name,
+          contact_phone: stop.contact_phone,
+          instructions: stop.instructions,
+        })),
+      ];
 
-    await db.from('load_stops').insert(stopsToInsert);
+      await db.from('load_stops').insert(stopsToInsert);
 
-    // Auto-setup geofences (fire-and-forget)
-    if (loadData?.id) {
-      db.functions.invoke('here-webhook', {
-        body: { action: 'auto-setup-geofences', load_id: loadData.id },
-      }).then(({ data: geoData }) => {
-        if (geoData?.success) {
-          console.log(`Auto-geofences: ${geoData.geofences_created} created for load ${payload.load_number}`);
-        }
-      }).catch((err) => {
-        console.warn('Auto-geofence setup failed (non-critical):', err);
+      // Auto-setup geofences (fire-and-forget)
+      if (loadData?.id) {
+        db.functions.invoke('here-webhook', {
+          body: { action: 'auto-setup-geofences', load_id: loadData.id },
+        }).then(({ data: geoData }) => {
+          if (geoData?.success) {
+            console.log(`Auto-geofences: ${geoData.geofences_created} created for load ${payload.load_number}`);
+          }
+        }).catch((err) => {
+          console.warn('Auto-geofence setup failed (non-critical):', err);
+        });
+      }
+
+      return loadData;
+    } catch (error: any) {
+      console.error('Failed to insert load:', {
+        error: error.message,
+        payload: payload,
       });
+      throw error;
     }
-
-    return loadData;
   };
 
   /** Delete a load and all its related records */
@@ -421,6 +463,24 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
       
       if (!trimmedLoadNumber) {
         setErrorMessage('Load number is required.');
+        setLoading(false);
+        submitInProgress.current = false;
+        return;
+      }
+
+      // Validate pickup and delivery information
+      const firstPickup = pickupStops[0];
+      const firstDelivery = deliveryStops[0];
+
+      if (!firstPickup || !firstPickup.address || !firstPickup.city || !firstPickup.state) {
+        setErrorMessage('Pickup location requires address, city, and state.');
+        setLoading(false);
+        submitInProgress.current = false;
+        return;
+      }
+
+      if (!firstDelivery || !firstDelivery.address || !firstDelivery.city || !firstDelivery.state) {
+        setErrorMessage('Delivery location requires address, city, and state.');
         setLoading(false);
         submitInProgress.current = false;
         return;
@@ -628,7 +688,10 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
         <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 flex items-center justify-between rounded-t-2xl z-10">
           <h2 className="text-xl font-bold text-white">Create New Load</h2>
           <button
-            onClick={onClose}
+            onClick={() => {
+              resetForm();
+              onClose();
+            }}
             className="p-2 hover:bg-white/20 rounded-lg transition-colors"
           >
             <X className="w-5 h-5 text-white" />
