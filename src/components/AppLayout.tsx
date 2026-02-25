@@ -234,9 +234,10 @@ const AppLayout: React.FC = () => {
     try {
       console.log('[AppLayout] Fetching loads and drivers...');
       
+      // Fetch all loads without relationship syntax (incompatible with custom PostgreSQL adapter)
       const { data: loadsData, error: loadsError } = await db
         .from('loads')
-        .select('*, customer:customers(*), driver:drivers(*)')
+        .select('*')
         .neq('status', 'PAID')
         .order('delivery_date', { ascending: true });
       
@@ -245,11 +246,20 @@ const AppLayout: React.FC = () => {
         throw loadsError;
       }
       
+      // Fetch customers and drivers separately
+      const { data: customersData, error: customersError } = await db
+        .from('customers')
+        .select('*');
+        
       const { data: driversData, error: driversError } = await db
         .from('drivers')
         .select('*')
         .order('name');
         
+      if (customersError) {
+        console.error('[AppLayout] Error fetching customers:', customersError);
+      }
+      
       if (driversError) {
         console.error('[AppLayout] Error fetching drivers:', driversError);
         throw driversError;
@@ -257,10 +267,16 @@ const AppLayout: React.FC = () => {
 
       console.log(`[AppLayout] Fetched ${loadsData?.length || 0} loads and ${driversData?.length || 0} drivers`);
 
-      if (loadsData) {
-        setLoads(loadsData);
+      // Enrich loads with customer and driver data
+      if (loadsData && customersData && driversData) {
+        const enrichedLoads = loadsData.map((load: any) => ({
+          ...load,
+          customer: customersData.find((c: any) => c.id === load.customer_id),
+          driver: driversData.find((d: any) => d.id === load.driver_id),
+        }));
+        setLoads(enrichedLoads);
         // Fetch payment data for invoiced loads
-        fetchPaymentData(loadsData);
+        fetchPaymentData(enrichedLoads);
       }
       if (driversData) setDrivers(driversData);
 
