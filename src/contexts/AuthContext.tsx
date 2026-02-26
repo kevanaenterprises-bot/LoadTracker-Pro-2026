@@ -71,13 +71,56 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       // Fetch user role and additional info from users table
-      const { data: userData, error: userError } = await supabaseFrom('users')
+      // First try by ID, then by email (in case of ID mismatch from incomplete signup)
+      let { data: userData, error: userError } = await supabaseFrom('users')
         .select('*')
         .eq('id', authData.user.id)
         .single();
 
+      // If not found by ID, try by email
       if (userError || !userData) {
-        return { success: false, error: 'Could not fetch user details' };
+        console.log('User not found by ID, trying email...');
+        const { data: userByEmail, error: emailError } = await supabaseFrom('users')
+          .select('*')
+          .eq('email', email.toLowerCase().trim())
+          .single();
+
+        if (userByEmail) {
+          // User exists but with different ID - update the ID to match auth
+          console.log('Found user by email, updating ID to match auth...');
+          const { error: updateError } = await supabaseFrom('users')
+            .update({ id: authData.user.id })
+            .eq('email', email.toLowerCase().trim());
+
+          if (updateError) {
+            console.error('Error updating user ID:', updateError);
+            // Continue anyway, use the existing user data
+          }
+          
+          userData = { ...userByEmail, id: authData.user.id };
+        } else {
+          // User doesn't exist at all - create new record
+          console.log('User record not found, creating one...');
+          
+          const newUser = {
+            id: authData.user.id,
+            email: email.toLowerCase().trim(),
+            password_hash: 'supabase_auth',
+            name: authData.user.email?.split('@')[0] || 'User',
+            role: 'admin',
+            is_active: true,
+            created_at: new Date().toISOString(),
+          };
+          
+          const { error: insertError } = await supabaseFrom('users').insert(newUser);
+
+          if (insertError) {
+            console.error('Error creating user record:', insertError);
+            return { success: false, error: `Could not create user profile: ${insertError.message}` };
+          }
+
+          userData = newUser;
+        }
       }
 
       const user: User = {
@@ -120,6 +163,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const { error: insertError } = await supabaseFrom('users').insert({
         id: authData.user.id,
         email: email.toLowerCase().trim(),
+        password_hash: 'supabase_auth', // Placeholder - actual password stored in Supabase Auth
         name: name,
         role: role,
         is_active: true,

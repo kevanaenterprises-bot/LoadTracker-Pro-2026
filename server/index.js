@@ -1,14 +1,30 @@
 import express from 'express';
 import cors from 'cors';
-import pg from 'pg';
 import rateLimit from 'express-rate-limit';
 import hereApi from './hereApi.js';
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+import nodemailer from 'nodemailer';
 
-const { Pool } = pg;
+// Load environment variables
+dotenv.config();
 
 const app = express();
 app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3001;
+
+// Initialize Supabase client
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.error('❌ Missing Supabase configuration!');
+  console.error('Required: SUPABASE_URL and SUPABASE_SERVICE_KEY (or VITE_ prefixed versions)');
+  process.exit(1);
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey);
+console.log('✅ Supabase client initialized:', supabaseUrl);
 
 // Rate limiting configuration
 const limiter = rateLimit({
@@ -26,17 +42,11 @@ app.use(limiter);
 app.use(cors());
 app.use(express.json());
 
-// Database pool
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL?.includes('railway') ? { rejectUnauthorized: false } : undefined,
-});
-
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
   try {
-    await pool.query('SELECT NOW()');
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    const { data, error } = await supabase.from('users').select('count').limit(1);
+    res.json({ status: 'ok', timestamp: new Date().toISOString(), supabase: !error });
   } catch (error) {
     res.status(500).json({ status: 'error', message: error.message });
   }
@@ -214,26 +224,43 @@ app.post('/api/send-invoice-email', async (req, res) => {
 
     console.log(`[Email] Sending invoice for load ${load_id}`);
     
-    // Get invoice data
-    const invoiceResult = await pool.query(
-      `SELECT i.*, l.id, l.load_number, c.company_name, c.email as customer_email
-       FROM invoices i
-       JOIN loads l ON i.load_id = l.id
-       LEFT JOIN customers c ON l.customer_id = c.id
-       WHERE l.id = $1`,
-      [load_id]
-    );
+    // Get load with customer data using Supabase
+    const { data: load, error: loadError } = await supabase
+      .from('loads')
+      .select('id, load_number, customer_id, bol_number')
+      .eq('id', load_id)
+      .single();
 
-    if (invoiceResult.rows.length === 0) {
+    if (loadError || !load) {
+      console.error('[Email] Load not found:', loadError);
+      return res.status(404).json({ error: 'Load not found' });
+    }
+
+    // Get customer info
+    const { data: customer, error: customerError } = await supabase
+      .from('customers')
+      .select('company_name, email')
+      .eq('id', load.customer_id)
+      .single();
+
+    if (customerError || !customer || !customer.email) {
+      console.error('[Email] Customer not found or no email:', customerError);
+      return res.status(400).json({ error: 'Customer email not configured' });
+    }
+
+    // Get invoice for this load
+    const { data: invoice, error: invoiceError } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('load_id', load_id)
+      .single();
+
+    if (invoiceError || !invoice) {
+      console.error('[Email] Invoice not found:', invoiceError);
       return res.status(404).json({ error: 'Invoice not found for this load' });
     }
 
-    const invoice = invoiceResult.rows[0];
-    const customerEmail = invoice.customer_email;
-
-    if (!customerEmail) {
-      return res.status(400).json({ error: 'Customer email not configured' });
-    }
+    const customerEmail = customer.email;
 
     // Get email configuration from environment
     const outlookUser = process.env.OUTLOOK_USER;
@@ -247,18 +274,121 @@ app.post('/api/send-invoice-email', async (req, res) => {
       });
     }
 
-    // For now, return a simulated success response
-    // In production, integrate with nodemailer to send actual emails
-    const emailedTo = [customerEmail, ...(additional_cc || [])].join(', ');
-    
-    console.log(`[Email] Would send invoice ${invoice.invoice_number} to: ${emailedTo}`);
+    // Create nodemailer transport for Outlook
+    const transporter = nodemailer.createTransport({
+      host: 'smtp-mail.outlook.com',
+      port: 587,
+      secure: false, // use TLS
+      auth: {
+        user: outlookUser,
+        pass: outlookPassword,
+      },
+    });
+
+    // Build CC list
+    const ccList = additional_cc && Array.isArray(additional_cc) ? additional_cc : [];
+    const allRecipients = [customerEmail, ...ccList].join(', ');
+
+    // Get POD documents for this load
+    const { data: podDocuments, error: podError } = await supabase
+      .from('pod_documents')
+      .select('*')
+      .eq('load_id', load_id);
+
+    if (podError) {
+      console.warn('[Email] Error fetching POD documents:', podError);
+    }
+
+    // Download POD files and prepare attachments
+    const attachments = [];
+    if (podDocuments && podDocuments.length > 0) {
+      console.log(`[Email] Found ${podDocuments.length} POD document(s) to attach`);
+      
+      for (const doc of podDocuments) {
+        try {
+          // Extract the file path from the URL
+          // Format: https://...supabase.co/storage/v1/object/public/pod-documents/path/to/file.jpg
+          const urlParts = doc.file_url.split('/pod-documents/');
+          if (urlParts.length > 1) {
+            const filePath = urlParts[1];
+            
+            // Download file from Supabase storage
+            const { data: fileData, error: downloadError } = await supabase.storage
+              .from('pod-documents')
+              .download(filePath);
+            
+            if (downloadError) {
+              console.error(`[Email] Error downloading ${doc.file_name}:`, downloadError);
+              continue;
+            }
+
+            // Convert blob to buffer
+            const buffer = Buffer.from(await fileData.arrayBuffer());
+            
+            attachments.push({
+              filename: doc.file_name,
+              content: buffer,
+              contentType: doc.file_type || 'application/octet-stream',
+            });
+            
+            console.log(`[Email] Attached: ${doc.file_name} (${(buffer.length / 1024).toFixed(2)} KB)`);
+          }
+        } catch (err) {
+          console.error(`[Email] Error processing attachment ${doc.file_name}:`, err);
+        }
+      }
+    }
+
+    // Email content
+    const mailOptions = {
+      from: outlookUser,
+      to: customerEmail,
+      cc: ccList.length > 0 ? ccList.join(', ') : undefined,
+      subject: `Invoice ${invoice.invoice_number} - Load ${load.load_number}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #2563eb;">Invoice ${invoice.invoice_number}</h2>
+          <p>Dear ${customer.company_name},</p>
+          <p>Please find attached the invoice and proof of delivery documents for the completed load.</p>
+          
+          <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3 style="margin-top: 0;">Load Details</h3>
+            <p><strong>Load Number:</strong> ${load.load_number}</p>
+            ${load.bol_number ? `<p><strong>BOL Number:</strong> ${load.bol_number}</p>` : ''}
+            <p><strong>Invoice Amount:</strong> $${Number(invoice.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            ${attachments.length > 0 ? `<p><strong>Attachments:</strong> ${attachments.length} document(s)</p>` : ''}
+          </div>
+          
+          <p>Thank you for your business!</p>
+          <p style="color: #6b7280; font-size: 14px; margin-top: 30px;">
+            This is an automated email. Please do not reply directly to this message.
+          </p>
+        </div>
+      `,
+      attachments: attachments,
+    };
+
+    // Send email
+    console.log(`[Email] Sending invoice ${invoice.invoice_number} to: ${allRecipients}`);
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`[Email] Email sent successfully: ${info.messageId}`);
+
+    // Update invoice record with email info
+    await supabase
+      .from('invoices')
+      .update({
+        emailed_at: new Date().toISOString(),
+        emailed_to: allRecipients,
+      })
+      .eq('id', invoice.id);
     
     res.json({
       success: true,
       message: `Invoice ${invoice.invoice_number} sent successfully to ${customerEmail}`,
-      emailed_to: emailedTo,
+      emailed_to: allRecipients,
       load_id: load_id,
-      invoice_number: invoice.invoice_number
+      invoice_number: invoice.invoice_number,
+      messageId: info.messageId
     });
 
   } catch (error) {
