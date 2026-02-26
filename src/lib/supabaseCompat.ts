@@ -1,8 +1,10 @@
-import { supabase } from './supabase';
-
 /**
- * Direct Supabase client wrapper - queries go directly to Supabase
+ * PostgreSQL-backed compatibility layer that provides a Supabase-like query builder
+ * interface. All queries are executed via the Express API server using the backend
+ * pg pool.  Authentication tokens are attached automatically.
  */
+
+import { query as dbQuery } from './database';
 
 export interface QueryBuilder {
   select(columns?: string): QueryBuilder;
@@ -26,14 +28,22 @@ export interface QueryBuilder {
   then(callback: (result: { data: any[]; error: any }) => any): Promise<any>;
 }
 
+type Operation = 'select' | 'insert' | 'update' | 'delete' | 'upsert';
+
+interface WhereCondition {
+  column: string;
+  operator: string;
+  value: any;
+}
+
 class PostgreSQLQueryBuilder implements QueryBuilder {
   private table: string;
   private selectColumns: string = '*';
-  private selectCalled: boolean = false;
-  private whereConditions: Array<{ column: string; operator: string; value: any }> = [];
-  private orderByClause: string = '';
-  private limitClause: string = '';
-  private operation: 'select' | 'insert' | 'update' | 'delete' | 'upsert' = 'select';
+  private whereConditions: WhereCondition[] = [];
+  private orderByColumn: string = '';
+  private orderByAsc: boolean = true;
+  private limitCount: number | null = null;
+  private operation: Operation = 'select';
   private updateData: any = null;
   private insertData: any = null;
   private upsertData: any = null;
@@ -45,16 +55,7 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
   }
 
   select(columns: string = '*'): QueryBuilder {
-    // Validate column names to prevent SQL injection
-    // Allow: column names, *, commas, spaces, colons (for joins), parentheses, and basic SQL functions
-    // Note: This also allows Supabase-style joins like "customer:customers(*)"
-    const validSelectPattern = /^[a-zA-Z0-9_.*,\s():!-]+$/;
-    if (!validSelectPattern.test(columns)) {
-      console.error('Invalid column specification:', columns);
-      throw new Error('Invalid column specification');
-    }
     this.selectColumns = columns;
-    this.selectCalled = true;
     if (this.operation !== 'insert' && this.operation !== 'update' && this.operation !== 'delete') {
       this.operation = 'select';
     }
@@ -126,11 +127,7 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
   }
 
   is(column: string, value: any): QueryBuilder {
-    if (value === null) {
-      this.whereConditions.push({ column, operator: 'IS', value: null });
-    } else {
-      this.whereConditions.push({ column, operator: 'IS', value });
-    }
+    this.whereConditions.push({ column, operator: 'IS', value });
     return this;
   }
 
@@ -140,13 +137,13 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
   }
 
   order(column: string, options?: { ascending?: boolean }): QueryBuilder {
-    const direction = options?.ascending === false ? 'DESC' : 'ASC';
-    this.orderByClause = ` ORDER BY ${column} ${direction}`;
+    this.orderByColumn = column;
+    this.orderByAsc = options?.ascending !== false;
     return this;
   }
 
   limit(count: number): QueryBuilder {
-    this.limitClause = ` LIMIT ${count}`;
+    this.limitCount = count;
     return this;
   }
 
@@ -159,130 +156,170 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
     return this.execute().then(callback);
   }
 
+  // -----------------------------------------------------------------------
+  // SQL builder
+  // -----------------------------------------------------------------------
+
+  /**
+   * Parse a Supabase-style select expression that may contain embedded-join
+   * notation like `*, customer:customers(*), driver:drivers(*)` and convert it
+   * into a plain SQL SELECT list + JOIN clauses.
+   *
+   * Convention:
+   *  - `alias:table(*)` where the main table has an `alias_id` column
+   *    → many-to-one → LEFT JOIN + row_to_json
+   *  - `alias:table(*)` where the related table name starts with the
+   *    singular of the main table name (one-to-many child table)
+   *    → one-to-many → LEFT JOIN + json_agg (requires GROUP BY)
+   */
+  private parseSelectExpression(): {
+    selectSQL: string;
+    joinSQL: string;
+    needsGroupBy: boolean;
+  } {
+    const joinPattern = /(\w+):(\w+)\(([^)]*)\)/g;
+    let joinSQL = '';
+    const extraSelects: string[] = [];
+    let needsGroupBy = false;
+
+    // Determine singular form of the main table name for FK detection.
+    // This uses a simplified English singularization that covers the tables
+    // present in this schema (ifta_trips → ifta_trip, etc.).
+    // For tables with irregular plurals, add explicit handling as needed.
+    const mainSingular = this.table.replace(/ies$/, 'y').replace(/s$/, '');
+
+    const remainder = this.selectColumns.replace(joinPattern, (_match, alias, relTable) => {
+      // Decide relationship direction
+      const relTableStartsWithMain = relTable.startsWith(mainSingular);
+
+      if (relTableStartsWithMain) {
+        // One-to-many: e.g. ifta_trip_states for ifta_trips
+        const fk = `${mainSingular}_id`;
+        joinSQL += ` LEFT JOIN "${relTable}" AS "${alias}" ON "${alias}"."${fk}" = "${this.table}"."id"`;
+        extraSelects.push(
+          `COALESCE(json_agg(DISTINCT "${alias}") FILTER (WHERE "${alias}"."id" IS NOT NULL), '[]') AS "${alias}"`,
+        );
+        needsGroupBy = true;
+      } else {
+        // Many-to-one: e.g. customers, drivers
+        joinSQL += ` LEFT JOIN "${relTable}" AS "${alias}" ON "${alias}"."id" = "${this.table}"."${alias}_id"`;
+        extraSelects.push(`row_to_json("${alias}") AS "${alias}"`);
+      }
+
+      return ''; // remove the join spec from the column list
+    });
+
+    // Normalise remaining base columns
+    const baseParts = remainder
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s !== '');
+
+    const baseSelect = baseParts.length === 0
+      ? `"${this.table}".*`
+      : baseParts.map((s) => (s === '*' ? `"${this.table}".*` : s)).join(', ');
+
+    const selectSQL = [baseSelect, ...extraSelects].join(', ');
+    return { selectSQL, joinSQL, needsGroupBy };
+  }
+
+  private buildSQL(): { text: string; params: any[] } {
+    const params: any[] = [];
+    let pi = 1; // param index
+
+    const addParam = (val: any): string => {
+      params.push(val);
+      return `$${pi++}`;
+    };
+
+    const buildWhere = (): string => {
+      if (!this.whereConditions.length) return '';
+      const parts = this.whereConditions.map((c) => {
+        if (c.operator === 'IS') {
+          return c.value === null
+            ? `"${c.column}" IS NULL`
+            : `"${c.column}" IS NOT NULL`;
+        }
+        if (c.operator === 'IN') {
+          const placeholders = (c.value as any[]).map((v) => addParam(v)).join(', ');
+          return `"${c.column}" IN (${placeholders})`;
+        }
+        return `"${c.column}" ${c.operator} ${addParam(c.value)}`;
+      });
+      return ` WHERE ${parts.join(' AND ')}`;
+    };
+
+    if (this.operation === 'select') {
+      const { selectSQL, joinSQL, needsGroupBy } = this.parseSelectExpression();
+      let text = `SELECT ${selectSQL} FROM "${this.table}"${joinSQL}${buildWhere()}`;
+      if (needsGroupBy) text += ` GROUP BY "${this.table}"."id"`;
+      if (this.orderByColumn) {
+        text += ` ORDER BY "${this.table}"."${this.orderByColumn}" ${this.orderByAsc ? 'ASC' : 'DESC'}`;
+      }
+      if (this.limitCount !== null) {
+        text += ` LIMIT ${addParam(this.limitCount)}`;
+      }
+      return { text, params };
+    }
+
+    if (this.operation === 'insert') {
+      const rows = Array.isArray(this.insertData) ? this.insertData : [this.insertData];
+      const columns = Object.keys(rows[0]);
+      const valueSets = rows
+        .map((row: any) => `(${columns.map((col) => addParam(row[col])).join(', ')})`)
+        .join(', ');
+      return {
+        text: `INSERT INTO "${this.table}" (${columns.map((c) => `"${c}"`).join(', ')}) VALUES ${valueSets} RETURNING *`,
+        params,
+      };
+    }
+
+    if (this.operation === 'upsert') {
+      const rows = Array.isArray(this.upsertData) ? this.upsertData : [this.upsertData];
+      const columns = Object.keys(rows[0]);
+      const valueSets = rows
+        .map((row: any) => `(${columns.map((col) => addParam(row[col])).join(', ')})`)
+        .join(', ');
+      const updateCols = columns.filter((c) => c !== this.upsertConflict);
+      const updateSet = updateCols.map((c) => `"${c}" = EXCLUDED."${c}"`).join(', ');
+      const conflictClause = this.upsertConflict
+        ? `ON CONFLICT ("${this.upsertConflict}") DO UPDATE SET ${updateSet}`
+        : 'ON CONFLICT DO NOTHING';
+      return {
+        text: `INSERT INTO "${this.table}" (${columns.map((c) => `"${c}"`).join(', ')}) VALUES ${valueSets} ${conflictClause} RETURNING *`,
+        params,
+      };
+    }
+
+    if (this.operation === 'update') {
+      const columns = Object.keys(this.updateData);
+      const setClause = columns.map((c) => `"${c}" = ${addParam(this.updateData[c])}`).join(', ');
+      return {
+        text: `UPDATE "${this.table}" SET ${setClause}${buildWhere()} RETURNING *`,
+        params,
+      };
+    }
+
+    if (this.operation === 'delete') {
+      return {
+        text: `DELETE FROM "${this.table}"${buildWhere()} RETURNING *`,
+        params,
+      };
+    }
+
+    throw new Error(`Unknown operation: ${this.operation}`);
+  }
+
   private async execute(): Promise<{ data: any; error: any }> {
     try {
-      let query = supabase.from(this.table);
+      const { text, params } = this.buildSQL();
+      const result = await dbQuery(text, params);
 
-      if (this.operation === 'select') {
-        query = query.select(this.selectColumns);
-        
-        for (const cond of this.whereConditions) {
-          switch (cond.operator) {
-            case '=':
-              query = query.eq(cond.column, cond.value);
-              break;
-            case '!=':
-              query = query.neq(cond.column, cond.value);
-              break;
-            case '>':
-              query = query.gt(cond.column, cond.value);
-              break;
-            case '>=':
-              query = query.gte(cond.column, cond.value);
-              break;
-            case '<':
-              query = query.lt(cond.column, cond.value);
-              break;
-            case '<=':
-              query = query.lte(cond.column, cond.value);
-              break;
-            case 'LIKE':
-              query = query.like(cond.column, cond.value);
-              break;
-            case 'ILIKE':
-              query = query.ilike(cond.column, cond.value);
-              break;
-            case 'IS':
-              query = query.is(cond.column, cond.value);
-              break;
-            case 'IN':
-              query = query.in(cond.column, cond.value);
-              break;
-          }
-        }
-        
-        if (this.orderByClause) {
-          const ascMatch = this.orderByClause.match(/ORDER BY (\w+) (ASC|DESC)/);
-          if (ascMatch) {
-            query = query.order(ascMatch[1], { ascending: ascMatch[2] !== 'DESC' });
-          }
-        }
-        
-        if (this.limitClause) {
-          const limitMatch = this.limitClause.match(/LIMIT (\d+)/);
-          if (limitMatch) {
-            query = query.limit(parseInt(limitMatch[1]));
-          }
-        }
-        
-      } else if (this.operation === 'insert') {
-        query = (query as any).insert(this.insertData);
-        
-      } else if (this.operation === 'upsert') {
-        query = (query as any).upsert(this.upsertData, { onConflict: this.upsertConflict || undefined });
-        
-      } else if (this.operation === 'update') {
-        query = (query as any).update(this.updateData);
-        for (const cond of this.whereConditions) {
-          switch (cond.operator) {
-            case '=':
-              query = query.eq(cond.column, cond.value);
-              break;
-            case '!=':
-              query = query.neq(cond.column, cond.value);
-              break;
-            case '>':
-              query = query.gt(cond.column, cond.value);
-              break;
-            case '>=':
-              query = query.gte(cond.column, cond.value);
-              break;
-            case '<':
-              query = query.lt(cond.column, cond.value);
-              break;
-            case '<=':
-              query = query.lte(cond.column, cond.value);
-              break;
-          }
-        }
-        
-      } else if (this.operation === 'delete') {
-        query = (query as any).delete();
-        for (const cond of this.whereConditions) {
-          switch (cond.operator) {
-            case '=':
-              query = query.eq(cond.column, cond.value);
-              break;
-            case '!=':
-              query = query.neq(cond.column, cond.value);
-              break;
-            case '>':
-              query = query.gt(cond.column, cond.value);
-              break;
-            case '>=':
-              query = query.gte(cond.column, cond.value);
-              break;
-            case '<':
-              query = query.lt(cond.column, cond.value);
-              break;
-            case '<=':
-              query = query.lte(cond.column, cond.value);
-              break;
-          }
-        }
-      }
-
-      const { data, error } = await query;
-      
-      if (error) {
-        throw error;
-      }
-      
       if (this.singleResult) {
-        return { data: data?.[0] || null, error: null };
+        return { data: result.rows[0] ?? null, error: null };
       }
-      
-      return { data, error: null };
+
+      return { data: result.rows, error: null };
     } catch (error: any) {
       console.error('Query execution error:', error);
       return { data: null, error };
@@ -290,108 +327,35 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
   }
 }
 
-/**
- * Create a Supabase-like interface for PostgreSQL queries
- */
+/** Create a Supabase-like query builder backed by the Express/pg API. */
 export function from(table: string): QueryBuilder {
   return new PostgreSQLQueryBuilder(table);
 }
 
-// Helper functions for Supabase function calls
-
-async function invokeGeocodeLocation(body: any) {
-  const { data, error } = await supabase.functions.invoke('geocode-location', {
-    body,
-  });
-
-  if (error) {
-    return { data: null, error: { message: error.message || 'Geocoding failed' } };
-  }
-
-  return { data, error: null };
-}
-
-async function invokeGeocodeAndSaveLocation(body: any) {
-  const { data, error } = await supabase.functions.invoke('geocode-and-save-location', {
-    body,
-  });
-
-  if (error) {
-    return { data: null, error: { message: error.message || 'Geocoding failed' } };
-  }
-
-  return { data, error: null };
-}
-
-async function invokeReverseGeocode(body: any) {
-  const { data, error } = await supabase.functions.invoke('reverse-geocode', {
-    body,
-  });
-
-  if (error) {
-    return { data: null, error: { message: error.message || 'Reverse geocoding failed' } };
-  }
-
-  return { data, error: null };
-}
-
-async function invokeCalculateRoute(body: any) {
-  const { data, error } = await supabase.functions.invoke('calculate-truck-route', {
-    body,
-  });
-
-  if (error) {
-    return { data: null, error: { message: error.message || 'Route calculation failed' } };
-  }
-
-  return { data, error: null };
-}
-
-async function invokeGetMapConfig() {
-  const { data, error } = await supabase.functions.invoke('get-map-config');
-
-  if (error) {
-    return { data: null, error: { message: error.message || 'Failed to get map config' } };
-  }
-
-  return { data, error: null };
-}
-
-// Create a db object that mimics Supabase's interface
+// Create a db object that mirrors the shape expected by existing components
 export const db = {
   from,
-  // Supabase realtime client
-  channel: (name: string) => supabase.channel(name),
-  removeChannel: (channel: any) => supabase.removeChannel(channel),
-  // Edge Functions - invokes Supabase edge functions
+  // Real-time channel stubs (not implemented with pg)
+  channel: (_name: string) => ({
+    on: (_event: string, _schema: any, _callback: any) => ({
+      subscribe: () => {},
+    }),
+    subscribe: () => {},
+  }),
+  removeChannel: (_channel: any) => {},
+  // Edge functions not available; components should use direct REST endpoints
   functions: {
-    invoke: async (functionName: string, options?: any) => {
-      const body = options?.body || {};
-      
-      try {
-        // Invoke Supabase edge function directly
-        const { data, error } = await supabase.functions.invoke(functionName, {
-          body,
-        });
-
-        if (error) {
-          console.error(`Edge function '${functionName}' error:`, error);
-          return { 
-            data: null, 
-            error: { message: error.message || 'Function invocation failed' } 
-          };
-        }
-
-        return { data, error: null };
-      } catch (error: any) {
-        console.error(`Edge function '${functionName}' error:`, error);
-        return { 
-          data: null, 
-          error: { message: error.message || 'Function invocation failed' } 
-        };
-      }
-    },
+    invoke: async (_fn: string, _opts?: any) => ({
+      data: null,
+      error: new Error('Edge functions are not available in this deployment'),
+    }),
   },
-  // Storage - uses Supabase storage
-  storage: supabase.storage,
+  // Storage stubs
+  storage: {
+    from: (_bucket: string) => ({
+      upload: async () => ({ data: null, error: new Error('Storage not available') }),
+      download: async () => ({ data: null, error: new Error('Storage not available') }),
+      getPublicUrl: () => ({ data: { publicUrl: '' } }),
+    }),
+  },
 };

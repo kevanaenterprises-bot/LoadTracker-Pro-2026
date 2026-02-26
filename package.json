@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "migrate": "node scripts/migrate.js",
+    "hash-passwords": "node scripts/hash-passwords.js",
     "start": "node server/index.js"
   },
   "dependencies": {
@@ -46,6 +47,7 @@
     "@supabase/supabase-js": "^2.97.0",
     "@tanstack/react-query": "^5.56.2",
     "@types/uuid": "^10.0.0",
+    "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.0.0",
@@ -58,6 +60,7 @@
     "express-rate-limit": "^8.2.1",
     "highlight.js": "^11.9.0",
     "input-otp": "^1.2.4",
+    "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.462.0",
     "marked": "^12.0.1",
     "next-themes": "^0.3.0",

@@ -1,131 +1,102 @@
-# Security Considerations
+# Security Guide
 
-## ⚠️ Critical Security Issues
+## Authentication Architecture
 
-This application was migrated from Supabase to direct PostgreSQL. The migration preserves the original security model, which has several limitations that **MUST** be addressed before production deployment.
+LoadTracker Pro uses **JWT-based authentication** backed by Railway PostgreSQL.
+Supabase authentication has been fully removed.
 
-### 1. Plaintext Password Storage
+### Authentication Flow
 
-**Issue**: Passwords are stored in plaintext in the `password_hash` column (despite the misleading name).
+1. **Signup** – POST `/api/auth/signup` with `{ email, password, name, role }`
+   - Password is hashed with **bcrypt** (cost factor 12) before storage
+   - Returns a signed **JWT** valid for 7 days
 
-**Risk**: If the database is compromised, all user passwords are immediately exposed.
+2. **Login** – POST `/api/auth/login` with `{ email, password }`
+   - Verifies the password against the stored bcrypt hash
+   - Returns a signed **JWT** valid for 7 days
 
-**Fix Required**:
-```javascript
-// Install bcrypt
-npm install bcrypt
+3. **Authenticated Requests** – include the JWT in the `Authorization` header:
+   ```
+   Authorization: Bearer <token>
+   ```
 
-// In AuthContext.tsx - Update login
-import bcrypt from 'bcrypt';
+4. **Logout** – clear the JWT from `localStorage` on the client (`tms_token` key)
 
-// When creating a user
-const hashedPassword = await bcrypt.hash(password, 10);
+### Password Security
 
-// When logging in
-const isValid = await bcrypt.compare(password, storedHash);
-```
+- Passwords are hashed with **bcrypt** (cost 12) – never stored in plaintext
+- Use `scripts/hash-passwords.js` to migrate any legacy plaintext passwords:
+  ```bash
+  DATABASE_URL=<your-url> node scripts/hash-passwords.js
+  ```
 
-**Migration Steps**:
-1. Add a migration script to hash existing passwords
-2. Update the login function in `src/contexts/AuthContext.tsx`
-3. Update any user creation code to hash passwords
-4. Update the database schema migration to reflect proper password hashing
+### JWT Secret
 
-### 2. Unauthenticated API Endpoint
+- Set `JWT_SECRET` as an environment variable on Railway and locally in `.env`
+- Generate a strong secret:
+  ```bash
+  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+  ```
+- **Never commit the secret to version control**
+- Rotate the secret periodically; all existing tokens will be invalidated on rotation
 
-**Issue**: The `/api/query` endpoint accepts arbitrary SQL queries without authentication.
+## Protected API Endpoints
 
-**Risk**: Anyone can execute SELECT, INSERT, UPDATE, DELETE queries against your database.
+All data-access endpoints require a valid JWT:
 
-**Current Protections** (inadequate):
-- Blocks certain dangerous keywords (DROP, TRUNCATE, etc.)
-- Prevents multiple statements
-- Uses parameterized queries (prevents basic SQL injection)
+| Endpoint | Method | Auth Required |
+|---|---|---|
+| `/api/health` | GET | No |
+| `/api/auth/login` | POST | No |
+| `/api/auth/signup` | POST | No |
+| `/api/query` | POST | **Yes** |
+| `/api/geocode` | POST | No |
+| `/api/geocode-and-save` | POST | **Yes** |
+| `/api/reverse-geocode` | POST | No |
+| `/api/calculate-route` | POST | No |
+| `/api/here-config` | GET | No |
+| `/api/send-invoice-email` | POST | **Yes** |
 
-**Fix Required**:
-Replace the generic query endpoint with specific authenticated endpoints:
+## Security Checklist
 
-```javascript
-// Example of a properly secured endpoint
-app.get('/api/customers', authenticateToken, async (req, res) => {
-  // Verify user has permission to view customers
-  if (!req.user.isAdmin) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-  
-  const result = await pool.query('SELECT * FROM customers ORDER BY company_name');
-  res.json(result.rows);
-});
-```
-
-### 3. Missing Features
-
-The following Supabase features are not yet implemented and will cause runtime errors:
-
-#### Realtime Subscriptions
-- **Used in**: `NotificationBell.tsx`
-- **Current Status**: Returns stub methods that do nothing
-- **Impact**: Real-time notifications won't work
-
-#### Edge Functions
-- **Used in**: Multiple files for:
-  - File uploads (`upload-pod-file`)
-  - Webhooks (`here-webhook`)
-  - SMS sending (`send-driver-sms`)
-  - Email sending (`send-invoice-email`)
-  - AI features (`ai-dispatch-advisor`)
-- **Current Status**: Returns stub that logs warning
-- **Impact**: These features will silently fail
-
-#### File Storage
-- **Used in**: Driver files, POD documents
-- **Current Status**: Returns stub that logs warning
-- **Impact**: File uploads won't work
-
-### 4. SSL Certificate Validation Disabled
-
-**Issue**: SSL certificate validation is disabled for Railway connections:
-```javascript
-ssl: { rejectUnauthorized: false }
-```
-
-**Risk**: Vulnerable to man-in-the-middle attacks
-
-**Fix**: Use proper SSL certificate validation or ensure Railway's SSL certificates are trusted by Node.js
-
-## Security Checklist for Production
-
-- [ ] Implement password hashing (bcrypt/Argon2/PBKDF2)
-- [ ] Migrate existing passwords to hashed format
-- [ ] Replace `/api/query` with specific authenticated endpoints
-- [ ] Implement JWT or session-based authentication
-- [ ] Add authorization checks to all API endpoints
-- [ ] Enable SSL certificate validation
-- [ ] Implement rate limiting
-- [ ] Add request validation and sanitization
-- [ ] Set up CORS properly (restrict allowed origins)
+- [x] Passwords hashed with bcrypt (cost 12)
+- [x] JWT-based authentication implemented
+- [x] JWT middleware protecting sensitive endpoints
+- [x] Supabase authentication fully removed
+- [x] No plaintext passwords stored
+- [x] Password migration script provided
+- [x] Rate limiting enabled (100 req / 15 min per IP)
+- [ ] Replace generic `/api/query` with specific typed endpoints
+- [ ] Enable proper SSL certificate verification for database connections
+- [ ] Implement token refresh / revocation
 - [ ] Implement file upload functionality with virus scanning
 - [ ] Set up monitoring and alerting for suspicious activity
 - [ ] Regular security audits
 - [ ] Keep dependencies up to date
 
-## Recommended Authentication Flow
+## Remaining Known Limitations
 
-1. **Login**:
-   - Client sends email/password to `/api/auth/login`
-   - Server verifies credentials using bcrypt
-   - Server generates JWT token
-   - Client stores token in httpOnly cookie or localStorage
+### Generic `/api/query` Endpoint
 
-2. **Authenticated Requests**:
-   - Client includes JWT token in Authorization header
-   - Server middleware verifies token
-   - Server checks user permissions
-   - Server executes request if authorized
+The `/api/query` endpoint still accepts arbitrary parameterized SQL from the
+frontend. While it is now protected by JWT authentication, it is still a broad
+surface area. Replace it with specific REST endpoints per operation as time
+allows.
 
-3. **Logout**:
-   - Clear token from client
-   - Optionally maintain token blacklist on server
+### SSL Certificate Validation
+
+SSL certificate validation is disabled for Railway database connections:
+```javascript
+ssl: { rejectUnauthorized: false }
+```
+This is acceptable within Railway's internal network but should be reviewed
+if the database is exposed externally.
+
+### Real-time Subscriptions / File Storage
+
+These Supabase features were stubbed out during migration and will silently
+fail. Implement replacements (e.g. WebSockets for real-time, S3/Cloudflare R2
+for storage) as needed.
 
 ## Additional Resources
 
@@ -136,4 +107,5 @@ ssl: { rejectUnauthorized: false }
 
 ## Reporting Security Issues
 
-If you discover a security vulnerability, please email security@example.com instead of using the public issue tracker.
+If you discover a security vulnerability, please email security@example.com
+instead of using the public issue tracker.
