@@ -2,9 +2,12 @@ import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import hereApi from './hereApi.js';
-import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import pg from 'pg';
+import { v4 as uuidv4 } from 'uuid';
 
 // Load environment variables
 dotenv.config();
@@ -13,18 +16,50 @@ const app = express();
 app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3001;
 
-// Initialize Supabase client
-const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+// Initialize PostgreSQL pool
+const { Pool } = pg;
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('railway')
+    ? { rejectUnauthorized: false }
+    : undefined,
+});
 
-if (!supabaseUrl || !supabaseKey) {
-  console.error('❌ Missing Supabase configuration!');
-  console.error('Required: SUPABASE_URL and SUPABASE_SERVICE_KEY (or VITE_ prefixed versions)');
+if (!process.env.DATABASE_URL) {
+  console.warn('⚠️  DATABASE_URL not set – database features will not work');
+} else {
+  console.log('✅ PostgreSQL pool initialized');
+}
+
+// JWT secret – required for auth
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('❌ JWT_SECRET environment variable is not set!');
   process.exit(1);
 }
 
-const supabase = createClient(supabaseUrl, supabaseKey);
-console.log('✅ Supabase client initialized:', supabaseUrl);
+// bcrypt cost factor – configurable for resource-constrained environments
+const BCRYPT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS || '12', 10);
+
+// --- JWT authentication middleware ---
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.startsWith('Bearer ')
+    ? authHeader.slice(7)
+    : null;
+
+  if (!token) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch {
+    return res.status(403).json({ error: 'Invalid or expired token' });
+  }
+}
 
 // Rate limiting configuration
 const limiter = rateLimit({
@@ -45,16 +80,135 @@ app.use(express.json());
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('users').select('count').limit(1);
-    res.json({ status: 'ok', timestamp: new Date().toISOString(), supabase: !error });
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', timestamp: new Date().toISOString(), database: true });
   } catch (error) {
     res.status(500).json({ status: 'error', message: error.message });
   }
 });
 
-// Generic query endpoint
+// --- Auth endpoints ---
+
+// POST /api/auth/signup
+app.post('/api/auth/signup', async (req, res) => {
+  try {
+    const { email, password, name, role = 'driver' } = req.body;
+
+    if (!email || !password || !name) {
+      return res.status(400).json({ error: 'email, password, and name are required' });
+    }
+
+    if (!['admin', 'driver'].includes(role)) {
+      return res.status(400).json({ error: 'role must be admin or driver' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Check if user already exists
+    const existing = await pool.query(
+      'SELECT id FROM users WHERE email = $1',
+      [normalizedEmail]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: 'An account with this email already exists' });
+    }
+
+    // Hash password
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const userId = uuidv4();
+
+    const result = await pool.query(
+      `INSERT INTO users (id, email, password_hash, name, role, is_active, created_at)
+       VALUES ($1, $2, $3, $4, $5, true, NOW()) RETURNING id, email, name, role, driver_id, is_active`,
+      [userId, normalizedEmail, passwordHash, name, role]
+    );
+
+    const user = result.rows[0];
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.status(201).json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        driver_id: user.driver_id,
+        is_active: user.is_active,
+      },
+    });
+  } catch (error) {
+    console.error('Signup error:', error);
+    res.status(500).json({ error: 'Signup failed' });
+  }
+});
+
+// POST /api/auth/login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'email and password are required' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const result = await pool.query(
+      'SELECT id, email, password_hash, name, role, driver_id, is_active FROM users WHERE email = $1',
+      [normalizedEmail]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const user = result.rows[0];
+
+    if (!user.is_active) {
+      return res.status(403).json({ error: 'Account is disabled' });
+    }
+
+    // Verify password
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Update last_login (best-effort – do not fail login if this errors)
+    pool.query('UPDATE users SET last_login = NOW() WHERE id = $1', [user.id])
+      .catch((err) => console.error('Failed to update last_login:', err));
+
+    const token = jwt.sign(
+      { id: user.id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        driver_id: user.driver_id,
+        is_active: user.is_active,
+      },
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// Generic query endpoint (protected by JWT)
 // WARNING: This endpoint should be replaced with specific authenticated endpoints in production
-app.post('/api/query', async (req, res) => {
+app.post('/api/query', authenticateToken, async (req, res) => {
   try {
     const { text, params } = req.body;
     
@@ -133,7 +287,7 @@ app.post('/api/geocode', async (req, res) => {
 });
 
 // Geocode an address and save to database
-app.post('/api/geocode-and-save', async (req, res) => {
+app.post('/api/geocode-and-save', authenticateToken, async (req, res) => {
   try {
     const { location_id, address, city, state, zip, geofence_radius } = req.body;
     
@@ -214,7 +368,7 @@ app.post('/api/calculate-route', async (req, res) => {
 });
 
 // Send invoice email endpoint
-app.post('/api/send-invoice-email', async (req, res) => {
+app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
   try {
     const { load_id, additional_cc } = req.body;
     
@@ -224,41 +378,38 @@ app.post('/api/send-invoice-email', async (req, res) => {
 
     console.log(`[Email] Sending invoice for load ${load_id}`);
     
-    // Get load with customer data using Supabase
-    const { data: load, error: loadError } = await supabase
-      .from('loads')
-      .select('id, load_number, customer_id, bol_number')
-      .eq('id', load_id)
-      .single();
+    // Get load with customer data using pg pool
+    const loadResult = await pool.query(
+      'SELECT id, load_number, customer_id, bol_number FROM loads WHERE id = $1',
+      [load_id]
+    );
 
-    if (loadError || !load) {
-      console.error('[Email] Load not found:', loadError);
+    if (loadResult.rows.length === 0) {
       return res.status(404).json({ error: 'Load not found' });
     }
+    const load = loadResult.rows[0];
 
     // Get customer info
-    const { data: customer, error: customerError } = await supabase
-      .from('customers')
-      .select('company_name, email')
-      .eq('id', load.customer_id)
-      .single();
+    const customerResult = await pool.query(
+      'SELECT company_name, email FROM customers WHERE id = $1',
+      [load.customer_id]
+    );
 
-    if (customerError || !customer || !customer.email) {
-      console.error('[Email] Customer not found or no email:', customerError);
+    if (customerResult.rows.length === 0 || !customerResult.rows[0].email) {
       return res.status(400).json({ error: 'Customer email not configured' });
     }
+    const customer = customerResult.rows[0];
 
     // Get invoice for this load
-    const { data: invoice, error: invoiceError } = await supabase
-      .from('invoices')
-      .select('*')
-      .eq('load_id', load_id)
-      .single();
+    const invoiceResult = await pool.query(
+      'SELECT * FROM invoices WHERE load_id = $1',
+      [load_id]
+    );
 
-    if (invoiceError || !invoice) {
-      console.error('[Email] Invoice not found:', invoiceError);
+    if (invoiceResult.rows.length === 0) {
       return res.status(404).json({ error: 'Invoice not found for this load' });
     }
+    const invoice = invoiceResult.rows[0];
 
     const customerEmail = customer.email;
 
@@ -290,56 +441,13 @@ app.post('/api/send-invoice-email', async (req, res) => {
     const allRecipients = [customerEmail, ...ccList].join(', ');
 
     // Get POD documents for this load
-    const { data: podDocuments, error: podError } = await supabase
-      .from('pod_documents')
-      .select('*')
-      .eq('load_id', load_id);
+    const podResult = await pool.query(
+      'SELECT * FROM pod_documents WHERE load_id = $1',
+      [load_id]
+    );
+    const podDocuments = podResult.rows;
 
-    if (podError) {
-      console.warn('[Email] Error fetching POD documents:', podError);
-    }
-
-    // Download POD files and prepare attachments
-    const attachments = [];
-    if (podDocuments && podDocuments.length > 0) {
-      console.log(`[Email] Found ${podDocuments.length} POD document(s) to attach`);
-      
-      for (const doc of podDocuments) {
-        try {
-          // Extract the file path from the URL
-          // Format: https://...supabase.co/storage/v1/object/public/pod-documents/path/to/file.jpg
-          const urlParts = doc.file_url.split('/pod-documents/');
-          if (urlParts.length > 1) {
-            const filePath = urlParts[1];
-            
-            // Download file from Supabase storage
-            const { data: fileData, error: downloadError } = await supabase.storage
-              .from('pod-documents')
-              .download(filePath);
-            
-            if (downloadError) {
-              console.error(`[Email] Error downloading ${doc.file_name}:`, downloadError);
-              continue;
-            }
-
-            // Convert blob to buffer
-            const buffer = Buffer.from(await fileData.arrayBuffer());
-            
-            attachments.push({
-              filename: doc.file_name,
-              content: buffer,
-              contentType: doc.file_type || 'application/octet-stream',
-            });
-            
-            console.log(`[Email] Attached: ${doc.file_name} (${(buffer.length / 1024).toFixed(2)} KB)`);
-          }
-        } catch (err) {
-          console.error(`[Email] Error processing attachment ${doc.file_name}:`, err);
-        }
-      }
-    }
-
-    // Email content
+    // Email content (no attachments since storage is not managed here)
     const mailOptions = {
       from: outlookUser,
       to: customerEmail,
@@ -349,14 +457,14 @@ app.post('/api/send-invoice-email', async (req, res) => {
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #2563eb;">Invoice ${invoice.invoice_number}</h2>
           <p>Dear ${customer.company_name},</p>
-          <p>Please find attached the invoice and proof of delivery documents for the completed load.</p>
+          <p>Please find the invoice details below for the completed load.</p>
           
           <div style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
             <h3 style="margin-top: 0;">Load Details</h3>
             <p><strong>Load Number:</strong> ${load.load_number}</p>
             ${load.bol_number ? `<p><strong>BOL Number:</strong> ${load.bol_number}</p>` : ''}
             <p><strong>Invoice Amount:</strong> $${Number(invoice.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-            ${attachments.length > 0 ? `<p><strong>Attachments:</strong> ${attachments.length} document(s)</p>` : ''}
+            ${podDocuments.length > 0 ? `<p><strong>POD Documents:</strong> ${podDocuments.length} document(s) on file</p>` : ''}
           </div>
           
           <p>Thank you for your business!</p>
@@ -365,7 +473,6 @@ app.post('/api/send-invoice-email', async (req, res) => {
           </p>
         </div>
       `,
-      attachments: attachments,
     };
 
     // Send email
@@ -374,13 +481,10 @@ app.post('/api/send-invoice-email', async (req, res) => {
     console.log(`[Email] Email sent successfully: ${info.messageId}`);
 
     // Update invoice record with email info
-    await supabase
-      .from('invoices')
-      .update({
-        emailed_at: new Date().toISOString(),
-        emailed_to: allRecipients,
-      })
-      .eq('id', invoice.id);
+    await pool.query(
+      'UPDATE invoices SET emailed_at = NOW(), emailed_to = $1 WHERE id = $2',
+      [allRecipients, invoice.id]
+    );
     
     res.json({
       success: true,

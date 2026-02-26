@@ -1,7 +1,7 @@
 // Database client that communicates with the API server
-const API_URL = import.meta.env.VITE_API_URL || 
-  (window.location.hostname === 'localhost' 
-    ? 'http://localhost:3001' 
+const API_URL = import.meta.env.VITE_API_URL ||
+  (window.location.hostname === 'localhost'
+    ? 'http://localhost:3001'
     : window.location.origin);
 
 export interface QueryResult<T = any> {
@@ -9,13 +9,20 @@ export interface QueryResult<T = any> {
   rowCount: number;
 }
 
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = localStorage.getItem('tms_token');
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 export async function query<T = any>(text: string, params?: any[]): Promise<QueryResult<T>> {
   try {
     const response = await fetch(`${API_URL}/api/query`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ text, params }),
     });
 
@@ -41,4 +48,3 @@ export async function healthCheck(): Promise<boolean> {
     return false;
   }
 }
-

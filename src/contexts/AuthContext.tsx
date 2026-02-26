@@ -1,6 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { supabase } from '@/lib/supabase';
-import { from as supabaseFrom } from '@/lib/supabaseCompat';
+
+const API_URL = import.meta.env.VITE_API_URL ||
+  (typeof window !== 'undefined' && window.location.hostname === 'localhost'
+    ? 'http://localhost:3001'
+    : typeof window !== 'undefined' ? window.location.origin : '');
 
 export interface User {
   id: string;
@@ -41,14 +44,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check for stored user session
+    // Restore user session from localStorage
     const storedUser = localStorage.getItem('tms_user');
-    if (storedUser) {
+    const storedToken = localStorage.getItem('tms_token');
+    if (storedUser && storedToken) {
       try {
         const parsedUser = JSON.parse(storedUser);
         setUser(parsedUser);
       } catch {
         localStorage.removeItem('tms_user');
+        localStorage.removeItem('tms_token');
       }
     }
     setLoading(false);
@@ -56,85 +61,30 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      // Sign in with Supabase auth
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email: email.toLowerCase().trim(),
-        password,
+      const response = await fetch(`${API_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.toLowerCase().trim(), password }),
       });
 
-      if (authError) {
-        return { success: false, error: authError.message || 'Login failed' };
+      const data = await response.json();
+
+      if (!response.ok) {
+        return { success: false, error: data.error || 'Login failed' };
       }
 
-      if (!authData.user) {
-        return { success: false, error: 'No user data returned' };
-      }
-
-      // Fetch user role and additional info from users table
-      // First try by ID, then by email (in case of ID mismatch from incomplete signup)
-      let { data: userData, error: userError } = await supabaseFrom('users')
-        .select('*')
-        .eq('id', authData.user.id)
-        .single();
-
-      // If not found by ID, try by email
-      if (userError || !userData) {
-        console.log('User not found by ID, trying email...');
-        const { data: userByEmail, error: emailError } = await supabaseFrom('users')
-          .select('*')
-          .eq('email', email.toLowerCase().trim())
-          .single();
-
-        if (userByEmail) {
-          // User exists but with different ID - update the ID to match auth
-          console.log('Found user by email, updating ID to match auth...');
-          const { error: updateError } = await supabaseFrom('users')
-            .update({ id: authData.user.id })
-            .eq('email', email.toLowerCase().trim());
-
-          if (updateError) {
-            console.error('Error updating user ID:', updateError);
-            // Continue anyway, use the existing user data
-          }
-          
-          userData = { ...userByEmail, id: authData.user.id };
-        } else {
-          // User doesn't exist at all - create new record
-          console.log('User record not found, creating one...');
-          
-          const newUser = {
-            id: authData.user.id,
-            email: email.toLowerCase().trim(),
-            password_hash: 'supabase_auth',
-            name: authData.user.email?.split('@')[0] || 'User',
-            role: 'admin',
-            is_active: true,
-            created_at: new Date().toISOString(),
-          };
-          
-          const { error: insertError } = await supabaseFrom('users').insert(newUser);
-
-          if (insertError) {
-            console.error('Error creating user record:', insertError);
-            return { success: false, error: `Could not create user profile: ${insertError.message}` };
-          }
-
-          userData = newUser;
-        }
-      }
-
-      const user: User = {
-        id: userData.id,
-        email: userData.email,
-        role: userData.role || 'driver',
-        driver_id: userData.driver_id,
-        name: userData.name,
-        is_active: userData.is_active !== false,
+      const loggedInUser: User = {
+        id: data.user.id,
+        email: data.user.email,
+        role: data.user.role,
+        driver_id: data.user.driver_id ?? null,
+        name: data.user.name,
+        is_active: data.user.is_active,
       };
 
-      // Store in localStorage
-      localStorage.setItem('tms_user', JSON.stringify(user));
-      setUser(user);
+      localStorage.setItem('tms_token', data.token);
+      localStorage.setItem('tms_user', JSON.stringify(loggedInUser));
+      setUser(loggedInUser);
 
       return { success: true };
     } catch (err) {
@@ -143,51 +93,37 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const signup = async (email: string, password: string, name: string, role: 'admin' | 'driver' = 'driver'): Promise<{ success: boolean; error?: string }> => {
+  const signup = async (
+    email: string,
+    password: string,
+    name: string,
+    role: 'admin' | 'driver' = 'driver',
+  ): Promise<{ success: boolean; error?: string }> => {
     try {
-      // Create user in Supabase Auth
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: email.toLowerCase().trim(),
-        password,
+      const response = await fetch(`${API_URL}/api/auth/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.toLowerCase().trim(), password, name, role }),
       });
 
-      if (authError) {
-        return { success: false, error: authError.message || 'Signup failed' };
+      const data = await response.json();
+
+      if (!response.ok) {
+        return { success: false, error: data.error || 'Signup failed' };
       }
 
-      if (!authData.user) {
-        return { success: false, error: 'No user data returned' };
-      }
-
-      // Create user record in users table
-      const { error: insertError } = await supabaseFrom('users').insert({
-        id: authData.user.id,
-        email: email.toLowerCase().trim(),
-        password_hash: 'supabase_auth', // Placeholder - actual password stored in Supabase Auth
-        name: name,
-        role: role,
-        is_active: true,
-        created_at: new Date().toISOString(),
-      });
-
-      if (insertError) {
-        console.error('Error creating user record:', insertError);
-        // Auth user is created but table record failed - user can still try to login
-        return { success: false, error: 'Account created but profile setup failed. Please contact support.' };
-      }
-
-      // Auto-login after signup
-      const user: User = {
-        id: authData.user.id,
-        email: email.toLowerCase().trim(),
-        role: role,
-        driver_id: null,
-        name: name,
-        is_active: true,
+      const newUser: User = {
+        id: data.user.id,
+        email: data.user.email,
+        role: data.user.role,
+        driver_id: data.user.driver_id ?? null,
+        name: data.user.name,
+        is_active: data.user.is_active,
       };
 
-      localStorage.setItem('tms_user', JSON.stringify(user));
-      setUser(user);
+      localStorage.setItem('tms_token', data.token);
+      localStorage.setItem('tms_user', JSON.stringify(newUser));
+      setUser(newUser);
 
       return { success: true };
     } catch (err) {
@@ -198,24 +134,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = () => {
     localStorage.removeItem('tms_user');
+    localStorage.removeItem('tms_token');
     setUser(null);
   };
 
-  const resetPassword = async (email: string): Promise<{ success: boolean; error?: string }> => {
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim(), {
-        redirectTo: `${window.location.origin}/reset-password`,
-      });
-
-      if (error) {
-        return { success: false, error: error.message || 'Failed to send reset email' };
-      }
-
-      return { success: true };
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to send reset email';
-      return { success: false, error: errorMessage };
-    }
+  // Password reset is not yet implemented server-side; returns a friendly message
+  const resetPassword = async (_email: string): Promise<{ success: boolean; error?: string }> => {
+    return {
+      success: false,
+      error: 'Password reset is not available. Please contact your administrator.',
+    };
   };
 
   const value: AuthContextType = {
