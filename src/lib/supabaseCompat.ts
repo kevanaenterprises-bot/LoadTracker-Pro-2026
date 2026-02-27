@@ -336,7 +336,10 @@ export function from(table: string): QueryBuilder {
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabaseDb =
-  supabaseUrl && supabaseAnonKey
+  typeof supabaseUrl === 'string' &&
+  typeof supabaseAnonKey === 'string' &&
+  supabaseUrl.length > 0 &&
+  supabaseAnonKey.length > 0
     ? createClient(supabaseUrl, supabaseAnonKey)
     : null;
 
