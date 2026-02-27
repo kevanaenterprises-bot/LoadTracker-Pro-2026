@@ -5,6 +5,7 @@
  */
 
 import { query as dbQuery } from './database';
+import { createClient } from '@supabase/supabase-js';
 
 export interface QueryBuilder {
   select(columns?: string): QueryBuilder;
@@ -332,8 +333,18 @@ export function from(table: string): QueryBuilder {
   return new PostgreSQLQueryBuilder(table);
 }
 
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseDb =
+  typeof supabaseUrl === 'string' &&
+  typeof supabaseAnonKey === 'string' &&
+  supabaseUrl.length > 0 &&
+  supabaseAnonKey.length > 0
+    ? createClient(supabaseUrl, supabaseAnonKey)
+    : null;
+
 // Create a db object that mirrors the shape expected by existing components
-export const db = {
+export const db = supabaseDb || {
   from,
   // Real-time channel stubs (not implemented with pg)
   channel: (_name: string) => ({
