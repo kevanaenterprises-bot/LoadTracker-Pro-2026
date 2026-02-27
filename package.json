@@ -13,7 +13,7 @@
     "preview": "vite preview",
     "migrate": "node scripts/migrate.js",
     "hash-passwords": "node scripts/hash-passwords.js",
-    "start": "node server/index.js"
+    "start": "npm run build && node server/index.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
