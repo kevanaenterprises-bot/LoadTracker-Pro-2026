@@ -3,8 +3,7 @@
   "build": {
     "builder": "nixpacks",
     "nixpacks": {
-      "language": "nodejs",
-      "version": "20"
+      "packages": ["nodejs_20"]
     }
   },
   "deploy": {
