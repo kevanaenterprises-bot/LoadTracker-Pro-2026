@@ -935,13 +935,7 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
               </div>
             ` : ''}
 
-            <!-- POD Documents -->
-            ${podImagesHtml ? `
-              <div class="pod-section">
-                <div class="pod-title">Attached POD Documents</div>
-                ${podImagesHtml}
-              </div>
-            ` : ''}
+
           </div>
         </body>
       </html>
@@ -1579,8 +1573,8 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                   </div>
                 </div>
 
-                {/* POD Documents */}
-                {documents.length > 0 && (
+                {/* POD Documents - hidden from invoice preview/print */}
+                {false && documents.length > 0 && (
                   <div className="pod-section border-t border-slate-200 pt-6">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">
@@ -1695,15 +1689,6 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
 
         {/* Footer */}
         <div className="px-6 py-4 bg-white border-t border-slate-200 rounded-b-2xl flex gap-3">
-          {hasBrokenPods ? (
-            <button
-              onClick={() => setShowReuploadConfirm(true)}
-              className="flex-1 px-6 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
-            >
-              <RotateCcw className="w-4 h-4" />
-              Re-upload POD ({brokenPodIds.size} broken)
-            </button>
-          ) : (
             <button
               onClick={handlePrint}
               className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
@@ -1711,7 +1696,6 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
               <Printer className="w-4 h-4" />
               Print Invoice
             </button>
-          )}
           <button
             onClick={onClose}
             className="flex-1 px-6 py-3 text-slate-600 bg-white border border-slate-200 rounded-xl font-medium hover:bg-slate-50 transition-colors"
