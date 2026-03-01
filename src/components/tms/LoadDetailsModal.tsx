@@ -634,7 +634,10 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
 
       const response = await fetch(`${apiUrl}/api/send-invoice-email`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('tms_token') || ''}`,
+        },
         body: JSON.stringify({ 
           load_id: load.id,
           additional_cc: ccList.length > 0 ? ccList : undefined

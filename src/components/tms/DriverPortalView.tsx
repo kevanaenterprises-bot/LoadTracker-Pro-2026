@@ -12,6 +12,7 @@ interface DriverPortalViewProps {
 }
 
 const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
+  const TRACKING_SESSION_KEY = 'ltp_driver_tracking_session';
   const [load, setLoad] = useState<Load | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +38,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
   // Invoice email status
   const [invoiceEmailStatus, setInvoiceEmailStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [invoiceEmailMessage, setInvoiceEmailMessage] = useState('');
+  const [portalToken, setPortalToken] = useState<string | null>(null);
 
 
 
@@ -53,6 +55,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
   const [urlCopied, setUrlCopied] = useState(false);
   const [showDebugLog, setShowDebugLog] = useState(false);
   const [debugLog, setDebugLog] = useState<string[]>([]);
+  const [trackingRecovered, setTrackingRecovered] = useState(false);
   const [dbWriteStatus, setDbWriteStatus] = useState<'idle' | 'writing' | 'success' | 'error'>('idle');
   const [lastDbCoords, setLastDbCoords] = useState<{ lat: number; lng: number } | null>(null);
 
@@ -61,6 +64,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
   const sendIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fallbackPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const latestPositionRef = useRef<GeolocationPosition | null>(null);
+  const resumeAttemptedRef = useRef<string | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef(false); // tracks if GPS session is active
 
@@ -108,6 +112,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
     try {
       const params = new URLSearchParams(window.location.search);
       const token = params.get('token');
+      setPortalToken(token);
       if (token) {
         setLoading(true);
         fetchLoadByToken(token);
@@ -842,6 +847,29 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
     fallbackPollRef.current = pollId;
   }, [handlePositionSuccess, log]);
 
+  const persistTrackingSession = useCallback(() => {
+    if (!load?.id) return;
+    try {
+      const payload = {
+        active: true,
+        loadId: load.id,
+        token: portalToken,
+        startedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(TRACKING_SESSION_KEY, JSON.stringify(payload));
+    } catch {
+      // non-critical
+    }
+  }, [load?.id, portalToken]);
+
+  const clearTrackingSession = useCallback(() => {
+    try {
+      localStorage.removeItem(TRACKING_SESSION_KEY);
+    } catch {
+      // non-critical
+    }
+  }, []);
+
   const startGpsTracking = useCallback(async () => {
     // Safety checks
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
@@ -859,6 +887,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
     setGpsError(null);
     setGpsErrorCode(null);
     setGpsStarting(true);
+    setTrackingRecovered(false);
     setShowTroubleshooting(false);
     activeRef.current = true;
 
@@ -900,6 +929,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
       handlePositionSuccess(position);
       setGpsTracking(true);
       setGpsStarting(false);
+      persistTrackingSession();
 
       // Step 2: Start continuous tracking with watchPosition
       // Always use high accuracy for continuous tracking to get real GPS
@@ -968,6 +998,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
             handlePositionSuccess(fallbackPos);
             setGpsTracking(true);
             setGpsStarting(false);
+            persistTrackingSession();
             startFallbackPolling();
             const interval = setInterval(() => {
               if (activeRef.current) sendLocationUpdate();
@@ -992,7 +1023,7 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
         if (isIOS) setShowTroubleshooting(true);
       }
     }
-  }, [sendLocationUpdate, handlePositionSuccess, startFallbackPolling, log, isIOS]);
+  }, [sendLocationUpdate, handlePositionSuccess, startFallbackPolling, log, isIOS, persistTrackingSession]);
 
   const stopGpsTracking = useCallback(() => {
     activeRef.current = false;
@@ -1007,8 +1038,45 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
     setGpsTracking(false);
     setUsingFallbackPolling(false);
     setGpsStarting(false);
+    setTrackingRecovered(false);
     latestPositionRef.current = null;
-  }, []);
+    clearTrackingSession();
+  }, [clearTrackingSession]);
+
+  useEffect(() => {
+    if (!load?.id || gpsTracking || gpsStarting) return;
+    if (resumeAttemptedRef.current === load.id) return;
+
+    try {
+      const raw = localStorage.getItem(TRACKING_SESSION_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (saved?.active && saved?.loadId === load.id && load.status !== 'INVOICED' && load.status !== 'PAID') {
+        resumeAttemptedRef.current = load.id;
+        log('Resuming GPS tracking from saved session...');
+        setTrackingRecovered(true);
+        setTimeout(() => setTrackingRecovered(false), 15000);
+        startGpsTracking();
+      }
+    } catch {
+      // non-critical
+    }
+  }, [load?.id, load?.status, gpsTracking, gpsStarting, startGpsTracking, log]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && activeRef.current) {
+        sendLocationUpdate();
+      }
+      if (document.visibilityState === 'visible' && activeRef.current && !gpsTracking && !gpsStarting) {
+        log('App visible again - restarting GPS listeners');
+        startGpsTracking();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [gpsTracking, gpsStarting, startGpsTracking, sendLocationUpdate, log]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -1020,6 +1088,17 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
       if (sendIntervalRef.current) clearInterval(sendIntervalRef.current);
       if (fallbackPollRef.current) clearInterval(fallbackPollRef.current);
     };
+  }, []);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!activeRef.current) return;
+      event.preventDefault();
+      event.returnValue = 'GPS tracking is active. Leaving now may interrupt tracking updates.';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
   // ---- Image Compression Utility ----
@@ -1210,15 +1289,20 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
         setInvoiceEmailStatus('sending');
         try {
           console.log(`[Auto-Invoice] Sending invoice ${invoiceNumber} email for load ${load.id}...`);
-          const { data: emailResult, error: emailError } = await db.functions.invoke('send-invoice-email', {
-            body: { load_id: load.id, auto_triggered: true },
+          const apiUrl = import.meta.env.VITE_API_URL || window.location.origin;
+          const response = await fetch(`${apiUrl}/api/send-invoice-email/public`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              load_id: load.id,
+              acceptance_token: portalToken || load.acceptance_token,
+              auto_triggered: true,
+            }),
           });
 
-          if (emailError) {
-            console.warn('[Auto-Invoice] Email edge function error:', emailError.message);
-            setInvoiceEmailStatus('error');
-            setInvoiceEmailMessage(emailResult?.error || emailError.message || 'Failed to send invoice email');
-          } else if (emailResult?.success) {
+          const emailResult = await response.json();
+
+          if (response.ok && emailResult?.success) {
             console.log('[Auto-Invoice] Invoice email sent successfully:', emailResult.message);
             setInvoiceEmailStatus('sent');
             setInvoiceEmailMessage(emailResult.message || `Invoice ${invoiceNumber} emailed to customer`);
@@ -1542,6 +1626,9 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
                     GPS Location Sharing
                   </h2>
                   <div className="flex items-center gap-2">
+                    {trackingRecovered && gpsTracking && (
+                      <span className="px-2 py-0.5 bg-cyan-100 text-cyan-700 rounded-full text-[10px] font-semibold">RECOVERED</span>
+                    )}
                     {usingFallbackPolling && gpsTracking && (
                       <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[10px] font-semibold">POLLING</span>
                     )}
@@ -1554,6 +1641,12 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
                   </div>
                 </div>
                 <p className="text-slate-600 text-sm mb-4">Share your live GPS location so dispatch can track your position.</p>
+
+                {trackingRecovered && gpsTracking && (
+                  <div className="mb-4 p-3 bg-cyan-50 border border-cyan-200 rounded-xl">
+                    <p className="text-cyan-800 text-sm font-medium">Tracking automatically recovered after app return. GPS updates are live again.</p>
+                  </div>
+                )}
 
                 {/* GPS Error */}
                 {gpsError && (

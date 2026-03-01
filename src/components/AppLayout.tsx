@@ -238,7 +238,6 @@ const AppLayout: React.FC = () => {
       const { data: loadsData, error: loadsError } = await db
         .from('loads')
         .select('*')
-        .neq('status', 'PAID')
         .order('delivery_date', { ascending: true });
       
       if (loadsError) {
