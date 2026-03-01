@@ -343,8 +343,9 @@ const supabaseDb =
     ? createClient(supabaseUrl, supabaseAnonKey)
     : null;
 
-// Create a db object that mirrors the shape expected by existing components
-export const db = supabaseDb || {
+// Always use Railway Postgres for data queries.
+// Only use Supabase client for file storage (if configured).
+export const db = {
   from,
   // Real-time channel stubs (not implemented with pg)
   channel: (_name: string) => ({
@@ -361,12 +362,14 @@ export const db = supabaseDb || {
       error: new Error('Edge functions are not available in this deployment'),
     }),
   },
-  // Storage stubs
-  storage: {
-    from: (_bucket: string) => ({
-      upload: async () => ({ data: null, error: new Error('Storage not available') }),
-      download: async () => ({ data: null, error: new Error('Storage not available') }),
-      getPublicUrl: () => ({ data: { publicUrl: '' } }),
-    }),
-  },
+  // Use Supabase storage if configured, otherwise stub
+  storage: supabaseDb
+    ? supabaseDb.storage
+    : {
+        from: (_bucket: string) => ({
+          upload: async () => ({ data: null, error: new Error('Storage not configured') }),
+          download: async () => ({ data: null, error: new Error('Storage not configured') }),
+          getPublicUrl: () => ({ data: { publicUrl: '' } }),
+        }),
+      },
 };
