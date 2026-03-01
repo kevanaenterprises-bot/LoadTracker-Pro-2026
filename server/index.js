@@ -403,7 +403,7 @@ async function buildInvoicePdf({ load, invoice, podDocuments, customer }) {
   const companyName = process.env.COMPANY_NAME || 'GO4 Freight Corp';
   const companyAddress = process.env.COMPANY_ADDRESS || '';
   const companyPhone = process.env.COMPANY_PHONE || '';
-  const companyEmail = process.env.OUTLOOK_USER || '';
+  const companyEmail = process.env.OUTLOOK_EMAIL || '';
   const companyMC = process.env.COMPANY_MC || '';
 
   // ── Page 1: Invoice ──────────────────────────────────────────────────────
@@ -609,7 +609,7 @@ app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
     );
     const podDocuments = podResult.rows;
 
-    const outlookUser = process.env.OUTLOOK_USER;
+    const outlookUser = process.env.OUTLOOK_EMAIL;
     const outlookPassword = process.env.OUTLOOK_PASSWORD;
     if (!outlookUser || !outlookPassword)
       return res.status(503).json({ error: 'Email credentials are not configured on the server' });
@@ -745,7 +745,7 @@ app.post('/api/send-invoice-email/public', async (req, res) => {
     );
     const podDocuments = podResult.rows;
 
-    const outlookUser = process.env.OUTLOOK_USER;
+    const outlookUser = process.env.OUTLOOK_EMAIL;
     const outlookPassword = process.env.OUTLOOK_PASSWORD;
     if (!outlookUser || !outlookPassword)
       return res.status(503).json({ error: 'Email credentials are not configured on the server' });
