@@ -49,6 +49,13 @@ interface PaymentInfo {
   invoiceNumber?: string | null;
 }
 
+const API_URL = import.meta.env.VITE_API_URL ||
+  (typeof window !== 'undefined' && window.location.hostname === 'localhost'
+    ? 'http://localhost:3001'
+    : typeof window !== 'undefined'
+      ? window.location.origin
+      : '');
+
 const AppLayout: React.FC = () => {
   const { user, logout } = useAuth();
   const { incrementUsage, checkAndPromptUpgrade } = useUsage();
@@ -233,12 +240,39 @@ const AppLayout: React.FC = () => {
     
     try {
       console.log('[AppLayout] Fetching loads and drivers...');
-      
-      // Fetch all loads without relationship syntax (incompatible with custom PostgreSQL adapter)
-      const { data: loadsData, error: loadsError } = await db
-        .from('loads')
-        .select('*')
-        .order('delivery_date', { ascending: true });
+      let loadsData: any[] | null = null;
+      let loadsError: any = null;
+
+      // Primary path: use dedicated backend endpoint for stable joined load data
+      try {
+        const token = localStorage.getItem('tms_token');
+        const response = await fetch(`${API_URL}/api/loads`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload?.error || `HTTP ${response.status}`);
+        }
+
+        const payload = await response.json();
+        loadsData = Array.isArray(payload?.data) ? payload.data : [];
+      } catch (apiErr) {
+        console.warn('[AppLayout] /api/loads failed, falling back to db query:', apiErr);
+
+        // Fallback path: existing compatibility-layer query
+        const fallback = await db
+          .from('loads')
+          .select('*')
+          .order('delivery_date', { ascending: true });
+
+        loadsData = fallback.data;
+        loadsError = fallback.error;
+      }
       
       if (loadsError) {
         console.error('[AppLayout] Error fetching loads:', loadsError);
@@ -266,13 +300,18 @@ const AppLayout: React.FC = () => {
 
       console.log(`[AppLayout] Fetched ${loadsData?.length || 0} loads and ${driversData?.length || 0} drivers`);
 
-      // Enrich loads with customer and driver data
+      // Enrich loads with customer and driver data when missing from backend join payload
       if (loadsData && customersData && driversData) {
-        const enrichedLoads = loadsData.map((load: any) => ({
-          ...load,
-          customer: customersData.find((c: any) => c.id === load.customer_id),
-          driver: driversData.find((d: any) => d.id === load.driver_id),
-        }));
+        const enrichedLoads = loadsData.map((load: any) => {
+          const joinedCustomer = load.customer || customersData.find((c: any) => c.id === load.customer_id);
+          const joinedDriver = load.driver || driversData.find((d: any) => d.id === load.driver_id);
+
+          return {
+            ...load,
+            customer: joinedCustomer,
+            driver: joinedDriver,
+          };
+        });
         setLoads(enrichedLoads);
         // Fetch payment data for invoiced loads
         fetchPaymentData(enrichedLoads);

@@ -242,6 +242,28 @@ app.post('/api/query', authenticateToken, async (req, res) => {
   }
 });
 
+// Dedicated dashboard loads endpoint (protected by JWT)
+app.get('/api/loads', authenticateToken, async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         l.*, 
+         row_to_json(c) AS customer,
+         row_to_json(d) AS driver
+       FROM loads l
+       LEFT JOIN customers c ON c.id = l.customer_id
+       LEFT JOIN drivers d ON d.id = l.driver_id
+       ORDER BY l.delivery_date ASC NULLS LAST, l.created_at DESC`
+    );
+
+    console.log(`[GET /api/loads] returned ${result.rows.length} rows`);
+    res.json({ data: result.rows, count: result.rows.length });
+  } catch (error) {
+    console.error('[GET /api/loads] error:', error);
+    res.status(500).json({ error: 'Failed to fetch loads' });
+  }
+});
+
 // HERE Maps API Endpoints
 
 // Get HERE API configuration (returns API key for frontend maps)
