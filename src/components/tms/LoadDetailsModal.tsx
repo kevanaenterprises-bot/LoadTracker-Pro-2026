@@ -632,17 +632,26 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
         .map(email => email.trim())
         .filter(email => email && email.includes('@'));
 
-      const response = await fetch(`${apiUrl}/api/send-invoice-email`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('tms_token') || ''}`,
-        },
-        body: JSON.stringify({ 
-          load_id: load.id,
-          additional_cc: ccList.length > 0 ? ccList : undefined
-        }),
-      });
+      const emailAbortController = new AbortController();
+      const emailTimeout = setTimeout(() => emailAbortController.abort(), 60000);
+
+      let response: Response;
+      try {
+        response = await fetch(`${apiUrl}/api/send-invoice-email`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem('tms_token') || ''}`,
+          },
+          body: JSON.stringify({ 
+            load_id: load.id,
+            additional_cc: ccList.length > 0 ? ccList : undefined
+          }),
+          signal: emailAbortController.signal,
+        });
+      } finally {
+        clearTimeout(emailTimeout);
+      }
 
       const data = await response.json();
 
