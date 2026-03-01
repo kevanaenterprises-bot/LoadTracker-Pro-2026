@@ -390,228 +390,307 @@ app.post('/api/calculate-route', async (req, res) => {
   }
 });
 
-const DEFAULT_ALWAYS_CC = (process.env.INVOICE_ALWAYS_CC || '')
-  .split(',')
-  .map((value) => value.trim())
-  .filter(Boolean);
-
-function uniqueEmails(emails = []) {
-  const seen = new Set();
-  const valid = [];
-  for (const email of emails) {
-    if (!email || typeof email !== 'string') continue;
-    const normalized = email.trim().toLowerCase();
-    if (!normalized.includes('@')) continue;
-    if (seen.has(normalized)) continue;
-    seen.add(normalized);
-    valid.push(normalized);
-  }
-  return valid;
-}
-
-async function fetchCompanySettings() {
-  const keys = ['company_name', 'company_email', 'company_phone'];
-  const result = await pool.query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
-  const settings = {};
-  for (const row of result.rows) settings[row.key] = row.value;
-  return {
-    companyName: settings.company_name || 'Turtle Logistics LLC',
-    companyEmail: settings.company_email || process.env.OUTLOOK_USER || 'dispatch@turtlelogisticsllc.com',
-    companyPhone: settings.company_phone || 'N/A',
-  };
-}
-
-async function buildCombinedAttachmentPdf({ load, invoice, podDocuments, customer, company }) {
+// ─── Build a combined PDF: formatted invoice (page 1) + all POD docs ───────
+async function buildInvoicePdf({ load, invoice, podDocuments, customer }) {
   const pdfDoc = await PDFDocument.create();
-  const titleFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const bodyFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const navy = rgb(0.07, 0.18, 0.42);
+  const black = rgb(0, 0, 0);
+  const gray = rgb(0.45, 0.45, 0.45);
+  const lightGray = rgb(0.92, 0.92, 0.92);
 
-  const firstPage = pdfDoc.addPage([612, 792]);
-  firstPage.drawText(company.companyName, { x: 50, y: 740, size: 20, font: titleFont, color: rgb(0.1, 0.2, 0.6) });
-  firstPage.drawText(`Invoice ${invoice.invoice_number}`, { x: 50, y: 700, size: 18, font: titleFont });
-  firstPage.drawText(`Load Number: ${load.load_number || 'N/A'}`, { x: 50, y: 670, size: 12, font: bodyFont });
-  firstPage.drawText(`BOL/POD Number: ${load.bol_number || 'N/A'}`, { x: 50, y: 650, size: 12, font: bodyFont });
-  firstPage.drawText(`Customer: ${customer.company_name || 'N/A'}`, { x: 50, y: 630, size: 12, font: bodyFont });
-  firstPage.drawText(`Amount Due: $${Number(invoice.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, { x: 50, y: 610, size: 12, font: bodyFont });
-  firstPage.drawText(`Generated: ${new Date().toLocaleString()}`, { x: 50, y: 590, size: 10, font: bodyFont });
-  firstPage.drawText(`POD Attachments Included: ${podDocuments.length}`, { x: 50, y: 560, size: 12, font: titleFont });
+  const companyName = process.env.COMPANY_NAME || 'GO4 Freight Corp';
+  const companyAddress = process.env.COMPANY_ADDRESS || '';
+  const companyPhone = process.env.COMPANY_PHONE || '';
+  const companyEmail = process.env.OUTLOOK_USER || '';
+  const companyMC = process.env.COMPANY_MC || '';
 
-  for (const [index, pod] of podDocuments.entries()) {
+  // ── Page 1: Invoice ──────────────────────────────────────────────────────
+  const page = pdfDoc.addPage([612, 792]);
+  const { width, height } = page.getSize();
+  let y = height - 50;
+
+  // Header bar
+  page.drawRectangle({ x: 0, y: height - 80, width, height: 80, color: navy });
+  page.drawText(companyName, { x: 30, y: height - 45, size: 22, font: boldFont, color: rgb(1, 1, 1) });
+  page.drawText('FREIGHT INVOICE', { x: width - 180, y: height - 45, size: 14, font: boldFont, color: rgb(1, 1, 1) });
+  if (companyMC) page.drawText(`MC# ${companyMC}`, { x: 30, y: height - 65, size: 9, font, color: rgb(0.8, 0.85, 1) });
+
+  y = height - 100;
+
+  // Invoice meta block (right side)
+  const metaX = width - 220;
+  page.drawText('Invoice #:', { x: metaX, y, size: 10, font: boldFont, color: black });
+  page.drawText(invoice.invoice_number || '', { x: metaX + 75, y, size: 10, font, color: black });
+  y -= 16;
+  page.drawText('Invoice Date:', { x: metaX, y, size: 10, font: boldFont, color: black });
+  page.drawText(new Date().toLocaleDateString('en-US'), { x: metaX + 85, y, size: 10, font, color: black });
+  y -= 16;
+  page.drawText('Load #:', { x: metaX, y, size: 10, font: boldFont, color: black });
+  page.drawText(load.load_number || '', { x: metaX + 55, y, size: 10, font, color: black });
+  if (load.bol_number) {
+    y -= 16;
+    page.drawText('BOL #:', { x: metaX, y, size: 10, font: boldFont, color: black });
+    page.drawText(load.bol_number, { x: metaX + 45, y, size: 10, font, color: black });
+  }
+
+  // Bill To block (left side)
+  y = height - 100;
+  page.drawText('BILL TO:', { x: 30, y, size: 9, font: boldFont, color: gray });
+  y -= 16;
+  page.drawText(customer.company_name || '', { x: 30, y, size: 12, font: boldFont, color: black });
+  if (customer.billing_address) { y -= 14; page.drawText(customer.billing_address, { x: 30, y, size: 10, font, color: black }); }
+  const cityLine = [customer.billing_city, customer.billing_state, customer.billing_zip].filter(Boolean).join(', ');
+  if (cityLine) { y -= 14; page.drawText(cityLine, { x: 30, y, size: 10, font, color: black }); }
+  if (customer.email) { y -= 14; page.drawText(customer.email, { x: 30, y, size: 9, font, color: gray }); }
+
+  // Divider
+  y = height - 210;
+  page.drawRectangle({ x: 30, y, width: width - 60, height: 1, color: lightGray });
+  y -= 20;
+
+  // Shipment details section
+  page.drawText('SHIPMENT DETAILS', { x: 30, y, size: 10, font: boldFont, color: navy });
+  y -= 18;
+
+  const col2 = 220, col3 = 400;
+  const drawRow = (label, val, xBase = 30) => {
+    if (!val && val !== 0) return;
+    page.drawText(`${label}:`, { x: xBase, y, size: 9, font: boldFont, color: gray });
+    page.drawText(String(val), { x: xBase + 110, y, size: 9, font, color: black });
+  };
+
+  const origin = [load.origin_address, load.origin_city, load.origin_state].filter(Boolean).join(', ');
+  const dest = [load.dest_address || load.destination_address, load.dest_city, load.dest_state].filter(Boolean).join(', ');
+  const destDisplay = dest || [load.dest_city, load.dest_state].filter(Boolean).join(', ');
+
+  drawRow('Origin', origin || [load.origin_city, load.origin_state].filter(Boolean).join(', '));
+  y -= 14;
+  drawRow('Destination', destDisplay || load.dest_company);
+  y -= 14;
+  if (load.dest_company) { drawRow('Consignee', load.dest_company); y -= 14; }
+  drawRow('Pickup Date', load.pickup_date ? new Date(load.pickup_date).toLocaleDateString('en-US') : null);
+  y -= 14;
+  drawRow('Delivery Date', load.delivery_date ? new Date(load.delivery_date).toLocaleDateString('en-US') : null);
+  y -= 14;
+  if (load.total_miles) { drawRow('Total Miles', `${Number(load.total_miles).toLocaleString()} mi`); y -= 14; }
+  if (load.weight) { drawRow('Weight', `${Number(load.weight).toLocaleString()} lbs`); y -= 14; }
+  if (load.cargo_description) { drawRow('Commodity', load.cargo_description); y -= 14; }
+
+  // Divider
+  y -= 10;
+  page.drawRectangle({ x: 30, y, width: width - 60, height: 1, color: lightGray });
+  y -= 20;
+
+  // Charges table header
+  page.drawRectangle({ x: 30, y: y - 4, width: width - 60, height: 18, color: navy });
+  page.drawText('DESCRIPTION', { x: 40, y: y - 1, size: 9, font: boldFont, color: rgb(1, 1, 1) });
+  page.drawText('AMOUNT', { x: width - 110, y: y - 1, size: 9, font: boldFont, color: rgb(1, 1, 1) });
+  y -= 22;
+
+  const fmt = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const chargeRows = [
+    ['Line Haul', Number(load.rate || 0)],
+  ];
+  if (Number(load.extra_stop_fee || 0) > 0) chargeRows.push(['Extra Stop Fee', Number(load.extra_stop_fee)]);
+  if (Number(load.lumper_fee || 0) > 0) chargeRows.push(['Lumper Fee', Number(load.lumper_fee)]);
+
+  let subtotal = 0;
+  for (const [desc, amt] of chargeRows) {
+    subtotal += amt;
+    page.drawText(desc, { x: 40, y, size: 10, font, color: black });
+    page.drawText(fmt(amt), { x: width - 120, y, size: 10, font, color: black });
+    y -= 18;
+    page.drawRectangle({ x: 30, y, width: width - 60, height: 0.5, color: lightGray });
+    y -= 8;
+  }
+
+  // Total amount due box
+  y -= 10;
+  page.drawRectangle({ x: width - 220, y: y - 6, width: 190, height: 28, color: navy });
+  page.drawText('TOTAL AMOUNT DUE:', { x: width - 215, y: y + 4, size: 10, font: boldFont, color: rgb(1, 1, 1) });
+  page.drawText(fmt(invoice.amount || subtotal), { x: width - 100, y: y + 4, size: 12, font: boldFont, color: rgb(1, 1, 1) });
+
+  y -= 50;
+
+  // Payment / remittance note
+  page.drawText('REMIT PAYMENT TO:', { x: 30, y, size: 9, font: boldFont, color: gray });
+  y -= 14;
+  page.drawText(companyName, { x: 30, y, size: 10, font: boldFont, color: black });
+  if (companyAddress) { y -= 12; page.drawText(companyAddress, { x: 30, y, size: 9, font, color: black }); }
+  if (companyPhone || companyEmail) {
+    y -= 12;
+    page.drawText([companyPhone, companyEmail].filter(Boolean).join('  |  '), { x: 30, y, size: 9, font, color: gray });
+  }
+
+  // Footer
+  if (podDocuments.length > 0) {
+    y -= 30;
+    page.drawText(`POD documents attached: ${podDocuments.length} file(s) follow on the next page(s).`, { x: 30, y, size: 9, font, color: gray });
+  }
+
+  // ── Pages 2+: POD documents ──────────────────────────────────────────────
+  for (let i = 0; i < podDocuments.length; i++) {
+    const pod = podDocuments[i];
     if (!pod.file_url) continue;
 
     try {
-      const response = await fetch(pod.file_url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const bytes = await response.arrayBuffer();
+      const resp = await fetch(pod.file_url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const bytes = await resp.arrayBuffer();
       const lowerName = (pod.file_name || '').toLowerCase();
       const lowerType = (pod.file_type || '').toLowerCase();
-      const isPdf = lowerType.includes('pdf') || lowerName.endsWith('.pdf') || pod.file_url.toLowerCase().endsWith('.pdf');
+      const isPdf = lowerType.includes('pdf') || lowerName.endsWith('.pdf');
 
       if (isPdf) {
-        const sourcePdf = await PDFDocument.load(bytes);
-        const pages = await pdfDoc.copyPages(sourcePdf, sourcePdf.getPageIndices());
-        pages.forEach((page) => pdfDoc.addPage(page));
-        continue;
+        const srcPdf = await PDFDocument.load(bytes);
+        const copied = await pdfDoc.copyPages(srcPdf, srcPdf.getPageIndices());
+        copied.forEach((p) => pdfDoc.addPage(p));
+      } else {
+        // JPEG / PNG image
+        const isPng = lowerType.includes('png') || lowerName.endsWith('.png');
+        const podPage = pdfDoc.addPage([612, 792]);
+        podPage.drawText(`POD ${i + 1}: ${pod.file_name || 'attachment'}`, { x: 30, y: 762, size: 10, font: boldFont, color: navy });
+        podPage.drawText(`Load ${load.load_number}  |  Invoice ${invoice.invoice_number}`, { x: 30, y: 748, size: 8, font, color: gray });
+        const image = isPng ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
+        const maxW = 552, maxH = 700;
+        const scale = Math.min(maxW / image.width, maxH / image.height, 1);
+        const dw = image.width * scale, dh = image.height * scale;
+        podPage.drawImage(image, { x: (612 - dw) / 2, y: 740 - dh, width: dw, height: dh });
       }
-
-      const isPng = lowerType.includes('png') || lowerName.endsWith('.png') || pod.file_url.toLowerCase().includes('.png');
-      const image = isPng ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
-      const page = pdfDoc.addPage([612, 792]);
-      const title = `POD ${index + 1}: ${pod.file_name || 'attachment'}`;
-      page.drawText(title.slice(0, 90), { x: 40, y: 760, size: 11, font: bodyFont });
-
-      const maxWidth = 540;
-      const maxHeight = 700;
-      const scale = Math.min(maxWidth / image.width, maxHeight / image.height, 1);
-      const drawWidth = image.width * scale;
-      const drawHeight = image.height * scale;
-      const x = (612 - drawWidth) / 2;
-      const y = (740 - drawHeight) / 2;
-
-      page.drawImage(image, { x, y, width: drawWidth, height: drawHeight });
-    } catch (error) {
-      const errorPage = pdfDoc.addPage([612, 792]);
-      errorPage.drawText(`POD ${index + 1} could not be embedded`, { x: 50, y: 740, size: 14, font: titleFont, color: rgb(0.8, 0.2, 0.2) });
-      errorPage.drawText(`File: ${pod.file_name || 'Unknown'}`, { x: 50, y: 710, size: 11, font: bodyFont });
-      errorPage.drawText(`Reason: ${String(error).slice(0, 180)}`, { x: 50, y: 690, size: 10, font: bodyFont });
+    } catch (err) {
+      const errPage = pdfDoc.addPage([612, 792]);
+      errPage.drawText(`POD ${i + 1} could not be embedded: ${pod.file_name || ''}`, { x: 30, y: 740, size: 12, font: boldFont, color: rgb(0.8, 0.2, 0.2) });
+      errPage.drawText(String(err).slice(0, 200), { x: 30, y: 715, size: 9, font, color: gray });
     }
   }
 
-  const mergedBytes = await pdfDoc.save();
-  return Buffer.from(mergedBytes);
+  return Buffer.from(await pdfDoc.save());
 }
 
-async function sendInvoiceEmailForLoad({ loadId, additionalCc = [] }) {
-  console.log(`[Email] Sending invoice for load ${loadId}`);
-
-  const loadResult = await pool.query(
-    'SELECT id, load_number, customer_id, bol_number, acceptance_token FROM loads WHERE id = $1',
-    [loadId]
-  );
-  if (loadResult.rows.length === 0) {
-    const error = new Error('Load not found');
-    error.statusCode = 404;
-    throw error;
-  }
-  const load = loadResult.rows[0];
-
-  const customerResult = await pool.query(
-    'SELECT company_name, email FROM customers WHERE id = $1',
-    [load.customer_id]
-  );
-  if (customerResult.rows.length === 0 || !customerResult.rows[0].email) {
-    const error = new Error('Customer email not configured');
-    error.statusCode = 400;
-    throw error;
-  }
-  const customer = customerResult.rows[0];
-
-  const invoiceResult = await pool.query(
-    'SELECT * FROM invoices WHERE load_id = $1 ORDER BY created_at DESC LIMIT 1',
-    [loadId]
-  );
-  if (invoiceResult.rows.length === 0) {
-    const error = new Error('Invoice not found for this load');
-    error.statusCode = 404;
-    throw error;
-  }
-  const invoice = invoiceResult.rows[0];
-
-  const outlookUser = process.env.OUTLOOK_USER;
-  const outlookPassword = process.env.OUTLOOK_PASSWORD;
-  if (!outlookUser || !outlookPassword) {
-    const error = new Error('Email credentials are not configured on the server');
-    error.statusCode = 503;
-    throw error;
-  }
-
-  const transporter = nodemailer.createTransport({
-    host: 'smtp-mail.outlook.com',
-    port: 587,
-    secure: false,
-    auth: {
-      user: outlookUser,
-      pass: outlookPassword,
-    },
-  });
-
-  const ccList = uniqueEmails([...(Array.isArray(additionalCc) ? additionalCc : []), ...DEFAULT_ALWAYS_CC]);
-  const allRecipients = uniqueEmails([customer.email, ...ccList]).join(', ');
-
-  const podResult = await pool.query(
-    'SELECT id, file_name, file_url, file_type FROM pod_documents WHERE load_id = $1 ORDER BY uploaded_at ASC',
-    [loadId]
-  );
-  const podDocuments = podResult.rows;
-
-  const company = await fetchCompanySettings();
-  const combinedPdf = await buildCombinedAttachmentPdf({
-    load,
-    invoice,
-    podDocuments,
-    customer,
-    company,
-  });
-
-  const attachmentFileName = `Invoice-${invoice.invoice_number}-Load-${load.load_number}.pdf`;
-  const mailOptions = {
-    from: outlookUser,
-    to: customer.email,
-    cc: ccList.length > 0 ? ccList.join(', ') : undefined,
-    subject: `Invoice ${invoice.invoice_number} - Load ${load.load_number}`,
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #2563eb;">Invoice ${invoice.invoice_number}</h2>
-        <p>Dear ${customer.company_name},</p>
-        <p>Attached is a single combined PDF containing your invoice and POD documents for this load.</p>
-        <div style="background: #f3f4f6; padding: 16px; border-radius: 8px; margin: 16px 0;">
-          <p><strong>Load Number:</strong> ${load.load_number}</p>
-          ${load.bol_number ? `<p><strong>BOL Number:</strong> ${load.bol_number}</p>` : ''}
-          <p><strong>Invoice Amount:</strong> $${Number(invoice.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-          <p><strong>Attachment:</strong> ${attachmentFileName}</p>
-        </div>
-        <p>Thank you for your business.</p>
-      </div>
-    `,
-    attachments: [
-      {
-        filename: attachmentFileName,
-        content: combinedPdf,
-        contentType: 'application/pdf',
-      },
-    ],
-  };
-
-  console.log(`[Email] Sending invoice ${invoice.invoice_number} to: ${allRecipients}`);
-  const info = await transporter.sendMail(mailOptions);
-
-  await pool.query(
-    'UPDATE invoices SET emailed_at = NOW(), emailed_to = $1 WHERE id = $2',
-    [allRecipients, invoice.id]
-  );
-
-  return {
-    success: true,
-    message: `Invoice ${invoice.invoice_number} sent successfully to ${customer.email}`,
-    emailed_to: allRecipients,
-    load_id: loadId,
-    invoice_number: invoice.invoice_number,
-    messageId: info.messageId,
-  };
-}
-
-// Protected send endpoint (admin/staff flows)
+// Send invoice email endpoint
 app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
   try {
     const { load_id, additional_cc } = req.body;
     if (!load_id) return res.status(400).json({ error: 'load_id is required' });
 
-    const result = await sendInvoiceEmailForLoad({
-      loadId: load_id,
-      additionalCc: additional_cc,
+    console.log(`[Email] Building invoice PDF for load ${load_id}`);
+
+    const loadResult = await pool.query(
+      `SELECT id, load_number, customer_id, bol_number, origin_city, origin_state, origin_address,
+              dest_city, dest_state, dest_address, dest_company, pickup_date, delivery_date,
+              cargo_description, weight, rate, extra_stop_fee, lumper_fee, total_miles
+       FROM loads WHERE id = $1`,
+      [load_id]
+    );
+    if (loadResult.rows.length === 0) return res.status(404).json({ error: 'Load not found' });
+    const load = loadResult.rows[0];
+
+    const customerResult = await pool.query(
+      'SELECT company_name, email, billing_address, billing_city, billing_state, billing_zip FROM customers WHERE id = $1',
+      [load.customer_id]
+    );
+    if (customerResult.rows.length === 0 || !customerResult.rows[0].email)
+      return res.status(400).json({ error: 'Customer email not configured' });
+    const customer = customerResult.rows[0];
+
+    const invoiceResult = await pool.query(
+      'SELECT * FROM invoices WHERE load_id = $1 ORDER BY created_at DESC LIMIT 1',
+      [load_id]
+    );
+    if (invoiceResult.rows.length === 0) return res.status(404).json({ error: 'Invoice not found for this load' });
+    const invoice = invoiceResult.rows[0];
+
+    const podResult = await pool.query(
+      'SELECT id, file_name, file_url, file_type FROM pod_documents WHERE load_id = $1 ORDER BY uploaded_at ASC',
+      [load_id]
+    );
+    const podDocuments = podResult.rows;
+
+    const outlookUser = process.env.OUTLOOK_USER;
+    const outlookPassword = process.env.OUTLOOK_PASSWORD;
+    if (!outlookUser || !outlookPassword)
+      return res.status(503).json({ error: 'Email credentials are not configured on the server' });
+
+    const pdfBuffer = await buildInvoicePdf({ load, invoice, podDocuments, customer });
+    const attachmentFileName = `Invoice-${invoice.invoice_number}-Load-${load.load_number}.pdf`;
+
+    const ccList = additional_cc && Array.isArray(additional_cc) ? additional_cc.filter(Boolean) : [];
+    const allRecipients = [customer.email, ...ccList].join(', ');
+    const fmt = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    const transporter = nodemailer.createTransport({
+      host: 'smtp-mail.outlook.com',
+      port: 587,
+      secure: false,
+      auth: { user: outlookUser, pass: outlookPassword },
     });
 
-    res.json(result);
+    const mailOptions = {
+      from: outlookUser,
+      to: customer.email,
+      cc: ccList.length > 0 ? ccList.join(', ') : undefined,
+      subject: `Invoice ${invoice.invoice_number} - Load ${load.load_number}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1e293b;">
+          <div style="background: #0f2d72; padding: 24px 30px; border-radius: 8px 8px 0 0;">
+            <h2 style="margin: 0; color: #fff; font-size: 20px;">Invoice ${invoice.invoice_number}</h2>
+            <p style="margin: 4px 0 0; color: #a5b4fc; font-size: 13px;">Load #${load.load_number}${load.bol_number ? '  |  BOL #' + load.bol_number : ''}</p>
+          </div>
+          <div style="border: 1px solid #e2e8f0; border-top: none; padding: 24px 30px; border-radius: 0 0 8px 8px;">
+            <p style="margin: 0 0 16px;">Dear ${customer.company_name},</p>
+            <p style="margin: 0 0 20px;">Please find your invoice and POD documents attached as a single PDF file.</p>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+              <tr style="background: #f1f5f9;">
+                <td style="padding: 10px 14px; font-weight: bold; border: 1px solid #e2e8f0;">Invoice Amount</td>
+                <td style="padding: 10px 14px; border: 1px solid #e2e8f0;">${fmt(invoice.amount)}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px 14px; font-weight: bold; border: 1px solid #e2e8f0;">Origin</td>
+                <td style="padding: 10px 14px; border: 1px solid #e2e8f0;">${[load.origin_city, load.origin_state].filter(Boolean).join(', ')}</td>
+              </tr>
+              <tr style="background: #f1f5f9;">
+                <td style="padding: 10px 14px; font-weight: bold; border: 1px solid #e2e8f0;">Destination</td>
+                <td style="padding: 10px 14px; border: 1px solid #e2e8f0;">${[load.dest_city, load.dest_state].filter(Boolean).join(', ')}</td>
+              </tr>
+              ${load.pickup_date ? `<tr><td style="padding: 10px 14px; font-weight: bold; border: 1px solid #e2e8f0;">Pickup Date</td><td style="padding: 10px 14px; border: 1px solid #e2e8f0;">${new Date(load.pickup_date).toLocaleDateString('en-US')}</td></tr>` : ''}
+              ${load.delivery_date ? `<tr style="background: #f1f5f9;"><td style="padding: 10px 14px; font-weight: bold; border: 1px solid #e2e8f0;">Delivery Date</td><td style="padding: 10px 14px; border: 1px solid #e2e8f0;">${new Date(load.delivery_date).toLocaleDateString('en-US')}</td></tr>` : ''}
+              <tr><td style="padding: 10px 14px; font-weight: bold; border: 1px solid #e2e8f0;">POD Documents</td><td style="padding: 10px 14px; border: 1px solid #e2e8f0;">${podDocuments.length} file(s) included in attachment</td></tr>
+            </table>
+            <p style="margin: 0 0 8px; font-size: 13px; color: #64748b;">The attached PDF contains the invoice followed by all POD documents.</p>
+            <p style="margin: 0; font-size: 13px; color: #64748b;">Thank you for your business!</p>
+          </div>
+        </div>
+      `,
+      attachments: [
+        {
+          filename: attachmentFileName,
+          content: pdfBuffer,
+          contentType: 'application/pdf',
+        },
+      ],
+    };
+
+    console.log(`[Email] Sending invoice ${invoice.invoice_number} to: ${allRecipients} with ${podDocuments.length} POD(s)`);
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`[Email] Sent successfully: ${info.messageId}`);
+
+    await pool.query(
+      'UPDATE invoices SET emailed_at = NOW(), emailed_to = $1 WHERE id = $2',
+      [allRecipients, invoice.id]
+    );
+
+    res.json({
+      success: true,
+      message: `Invoice ${invoice.invoice_number} sent to ${customer.email} with ${podDocuments.length} POD(s) attached`,
+      emailed_to: allRecipients,
+      load_id: load_id,
+      invoice_number: invoice.invoice_number,
+      messageId: info.messageId,
+    });
+
   } catch (error) {
     console.error('Send email error:', error);
     res.status(error.statusCode || 500).json({ error: error.message || 'Failed to send invoice email' });
@@ -629,17 +708,73 @@ app.post('/api/send-invoice-email/public', async (req, res) => {
       'SELECT id FROM loads WHERE id = $1 AND acceptance_token = $2',
       [load_id, acceptance_token]
     );
-
     if (validate.rows.length === 0) {
       return res.status(403).json({ error: 'Invalid token for this load' });
     }
 
-    const result = await sendInvoiceEmailForLoad({
-      loadId: load_id,
-      additionalCc: additional_cc,
+    // Reuse the same protected endpoint logic
+    const fakeReq = { body: { load_id, additional_cc }, headers: {} };
+    const loadResult = await pool.query(
+      `SELECT id, load_number, customer_id, bol_number, origin_city, origin_state, origin_address,
+              dest_city, dest_state, dest_address, dest_company, pickup_date, delivery_date,
+              cargo_description, weight, rate, extra_stop_fee, lumper_fee, total_miles
+       FROM loads WHERE id = $1`,
+      [load_id]
+    );
+    if (loadResult.rows.length === 0) return res.status(404).json({ error: 'Load not found' });
+    const load = loadResult.rows[0];
+
+    const customerResult = await pool.query(
+      'SELECT company_name, email, billing_address, billing_city, billing_state, billing_zip FROM customers WHERE id = $1',
+      [load.customer_id]
+    );
+    if (customerResult.rows.length === 0 || !customerResult.rows[0].email)
+      return res.status(400).json({ error: 'Customer email not configured' });
+    const customer = customerResult.rows[0];
+
+    const invoiceResult = await pool.query(
+      'SELECT * FROM invoices WHERE load_id = $1 ORDER BY created_at DESC LIMIT 1',
+      [load_id]
+    );
+    if (invoiceResult.rows.length === 0) return res.status(404).json({ error: 'Invoice not found for this load' });
+    const invoice = invoiceResult.rows[0];
+
+    const podResult = await pool.query(
+      'SELECT id, file_name, file_url, file_type FROM pod_documents WHERE load_id = $1 ORDER BY uploaded_at ASC',
+      [load_id]
+    );
+    const podDocuments = podResult.rows;
+
+    const outlookUser = process.env.OUTLOOK_USER;
+    const outlookPassword = process.env.OUTLOOK_PASSWORD;
+    if (!outlookUser || !outlookPassword)
+      return res.status(503).json({ error: 'Email credentials are not configured on the server' });
+
+    const pdfBuffer = await buildInvoicePdf({ load, invoice, podDocuments, customer });
+    const attachmentFileName = `Invoice-${invoice.invoice_number}-Load-${load.load_number}.pdf`;
+    const ccList = Array.isArray(additional_cc) ? additional_cc.filter(Boolean) : [];
+    const allRecipients = [customer.email, ...ccList].join(', ');
+
+    const transporter = nodemailer.createTransport({
+      host: 'smtp-mail.outlook.com', port: 587, secure: false,
+      auth: { user: outlookUser, pass: outlookPassword },
+    });
+    const fmt = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    await transporter.sendMail({
+      from: outlookUser, to: customer.email,
+      cc: ccList.length > 0 ? ccList.join(', ') : undefined,
+      subject: `Invoice ${invoice.invoice_number} - Load ${load.load_number}`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto"><h2>Invoice ${invoice.invoice_number}</h2><p>Dear ${customer.company_name},</p><p>Please find your invoice and POD documents attached.</p><p><strong>Amount Due: ${fmt(invoice.amount)}</strong></p><p>Thank you for your business!</p></div>`,
+      attachments: [{ filename: attachmentFileName, content: pdfBuffer, contentType: 'application/pdf' }],
     });
 
-    res.json(result);
+    await pool.query('UPDATE invoices SET emailed_at = NOW(), emailed_to = $1 WHERE id = $2', [allRecipients, invoice.id]);
+
+    res.json({
+      success: true,
+      message: `Invoice ${invoice.invoice_number} sent to ${customer.email} with ${podDocuments.length} POD(s) attached`,
+      emailed_to: allRecipients,
+    });
   } catch (error) {
     console.error('Public send email error:', error);
     res.status(error.statusCode || 500).json({ error: error.message || 'Failed to send invoice email' });
