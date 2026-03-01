@@ -196,8 +196,8 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
         
         if (loc?.latitude && loc?.longitude) {
           statusMap[stop.id] = {
-            lat: loc.latitude,
-            lng: loc.longitude,
+            lat: Number(loc.latitude),
+            lng: Number(loc.longitude),
             radius: loc.geofence_radius || 500,
           };
         } else {
