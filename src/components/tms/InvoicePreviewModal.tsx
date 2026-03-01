@@ -366,9 +366,9 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
     const podImagesHtml = documents
       .filter(doc => doc.file_type?.startsWith('image/') && !brokenPodIds.has(doc.id))
       .map(doc => `
-        <div class="pod-image-wrapper">
-          <img src="${doc.file_url}" alt="${doc.file_name}" class="pod-image" />
-          <p class="pod-caption">${doc.file_name}</p>
+        <div style="margin-bottom:16px; page-break-inside:avoid;">
+          <img src="${doc.file_url}" alt="${doc.file_name}" style="width:100%; max-height:700px; object-fit:contain; display:block;" />
+          <p style="font-size:11px; color:#64748b; margin-top:4px; text-align:center;">${doc.file_name}</p>
         </div>
       `)
       .join('');
@@ -935,6 +935,11 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
               </div>
             ` : ''}
 
+            ${podImagesHtml ? `
+              <div style="margin-top:24px; border-top:1px solid #e2e8f0; padding-top:16px;">
+                ${podImagesHtml}
+              </div>
+            ` : ''}
 
           </div>
         </body>
@@ -1573,8 +1578,8 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                   </div>
                 </div>
 
-                {/* POD Documents - hidden from invoice preview/print */}
-                {false && documents.length > 0 && (
+                {/* POD Documents */}
+                {documents.length > 0 && (
                   <div className="pod-section border-t border-slate-200 pt-6">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">
