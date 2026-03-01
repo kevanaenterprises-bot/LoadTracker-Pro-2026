@@ -622,7 +622,7 @@ app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
     const fmt = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
     const transporter = nodemailer.createTransport({
-      host: 'smtp-mail.outlook.com',
+      host: 'smtp.office365.com',
       port: 587,
       secure: false,
       auth: { user: outlookUser, pass: outlookPassword },
@@ -756,7 +756,7 @@ app.post('/api/send-invoice-email/public', async (req, res) => {
     const allRecipients = [customer.email, ...ccList].join(', ');
 
     const transporter = nodemailer.createTransport({
-      host: 'smtp-mail.outlook.com', port: 587, secure: false,
+      host: 'smtp.office365.com', port: 587, secure: false,
       auth: { user: outlookUser, pass: outlookPassword },
     });
     const fmt = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
