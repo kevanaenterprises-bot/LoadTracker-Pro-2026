@@ -64,6 +64,8 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [stops, setStops] = useState<LoadStop[]>([]);
+  const [uploadingPod, setUploadingPod] = useState(false);
+  const podFileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showInvoicePreview, setShowInvoicePreview] = useState(false);
@@ -487,6 +489,51 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
   const handleDelete = () => {
     if (load && onDelete) {
       onDelete(load);
+    }
+  };
+
+  const handleDeletePod = async (doc: PODDocument) => {
+    if (!confirm(`Delete "${doc.file_name}"? This cannot be undone.`)) return;
+    try {
+      // Remove from Supabase storage
+      if (doc.file_url) {
+        const urlObj = new URL(doc.file_url);
+        // Path is like /storage/v1/object/public/pod-documents/<load_id>/<file>
+        const pathParts = urlObj.pathname.split('/storage/v1/object/public/pod-documents/');
+        if (pathParts[1]) {
+          await db.storage.from('pod-documents').remove([pathParts[1]]);
+        }
+      }
+      // Remove DB record
+      await db.from('pod_documents').delete().eq('id', doc.id);
+      setDocuments(prev => prev.filter(d => d.id !== doc.id));
+    } catch (err: any) {
+      alert('Failed to delete: ' + (err.message || err));
+    }
+  };
+
+  const handleUploadPod = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!load || !e.target.files?.length) return;
+    setUploadingPod(true);
+    try {
+      for (const file of Array.from(e.target.files)) {
+        const ext = file.name.split('.').pop() || 'jpg';
+        const storagePath = `${load.id}/${Date.now()}.${ext}`;
+        await db.storage.from('pod-documents').upload(storagePath, file, { contentType: file.type, upsert: true });
+        const { data: urlData } = db.storage.from('pod-documents').getPublicUrl(storagePath);
+        const { data: newDoc } = await db.from('pod_documents').insert({
+          load_id: load.id,
+          file_name: file.name,
+          file_url: urlData.publicUrl,
+          file_type: file.type,
+        }).select().single();
+        if (newDoc) setDocuments(prev => [...prev, newDoc as PODDocument]);
+      }
+    } catch (err: any) {
+      alert('Upload failed: ' + (err.message || err));
+    } finally {
+      setUploadingPod(false);
+      if (podFileInputRef.current) podFileInputRef.current.value = '';
     }
   };
 
@@ -1371,34 +1418,63 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
             </div>
 
             {/* POD Documents */}
-            {documents.length > 0 && (
-              <div className="bg-slate-50 rounded-xl p-5">
-                <div className="flex items-center gap-2 mb-4">
-                  <FileText className="w-5 h-5 text-blue-500" />
-                  <span className="font-semibold text-slate-700">POD Documents</span>
-                  <span className="ml-auto text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
-                    {documents.length} file{documents.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  {documents.map((doc) => (
-                    <a
-                      key={doc.id}
-                      href={doc.file_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-between p-3 bg-white rounded-lg border border-slate-200 hover:border-blue-300 hover:bg-blue-50 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <FileText className="w-5 h-5 text-slate-400" />
-                        <span className="text-sm font-medium text-slate-700">{doc.file_name}</span>
-                      </div>
-                      <Download className="w-4 h-4 text-slate-400" />
-                    </a>
-                  ))}
+            <div className="bg-slate-50 rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <FileText className="w-5 h-5 text-blue-500" />
+                <span className="font-semibold text-slate-700">POD Documents</span>
+                <span className="ml-1 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                  {documents.length} file{documents.length !== 1 ? 's' : ''}
+                </span>
+                <div className="ml-auto">
+                  <input
+                    ref={podFileInputRef}
+                    type="file"
+                    accept="image/*,.pdf"
+                    multiple
+                    className="hidden"
+                    onChange={handleUploadPod}
+                  />
+                  <button
+                    onClick={() => podFileInputRef.current?.click()}
+                    disabled={uploadingPod}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    {uploadingPod ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5 rotate-180" />}
+                    {uploadingPod ? 'Uploading...' : 'Upload POD'}
+                  </button>
                 </div>
               </div>
-            )}
+              {documents.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-2">No POD documents uploaded yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {documents.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="flex items-center justify-between p-3 bg-white rounded-lg border border-slate-200 hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                    >
+                      <a
+                        href={doc.file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-3 flex-1 min-w-0"
+                      >
+                        <FileText className="w-5 h-5 text-slate-400 shrink-0" />
+                        <span className="text-sm font-medium text-slate-700 truncate">{doc.file_name}</span>
+                        <Download className="w-4 h-4 text-slate-400 shrink-0" />
+                      </a>
+                      <button
+                        onClick={() => handleDeletePod(doc)}
+                        className="ml-3 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors shrink-0"
+                        title="Delete this POD"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Invoice & Billing Section */}
             {(load.status === 'DELIVERED' || load.status === 'INVOICED' || load.status === 'PAID') && (
