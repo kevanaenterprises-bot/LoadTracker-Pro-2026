@@ -633,7 +633,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
         .filter(email => email && email.includes('@'));
 
       const emailAbortController = new AbortController();
-      const emailTimeout = setTimeout(() => emailAbortController.abort(), 60000);
+      const emailTimeout = setTimeout(() => emailAbortController.abort(), 120000);
 
       let response: Response;
       try {
