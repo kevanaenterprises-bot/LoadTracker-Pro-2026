@@ -1569,7 +1569,6 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                 <label className="block text-sm font-medium text-slate-700 mb-1">CC (default):</label>
                 <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-600">
                   <div>kevin@go4fc.com</div>
-                  <div>gofarmsbills@gmail.com</div>
                 </div>
               </div>
 
