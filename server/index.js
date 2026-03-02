@@ -531,14 +531,12 @@ async function buildInvoicePdf({ load, invoice, podDocuments, customer }) {
     page.drawText(`POD documents attached: ${podDocuments.length} file(s) follow on the next page(s).`, { x: 30, y, size: 9, font, color: gray });
   }
 
-  // ── Pages 2+: POD documents ──────────────────────────────────────────────
-  for (let i = 0; i < podDocuments.length; i++) {
-    const pod = podDocuments[i];
-    if (!pod.file_url) continue;
-
+  // ── Pages 2+: POD documents (download all in parallel, then add pages in order) ──
+  const podResults = await Promise.all(podDocuments.map(async (pod, i) => {
+    if (!pod.file_url) return { i, pod, bytes: null, error: 'No URL' };
     try {
       const podFetchAbort = new AbortController();
-      const podFetchTimeout = setTimeout(() => podFetchAbort.abort(), 5000);
+      const podFetchTimeout = setTimeout(() => podFetchAbort.abort(), 10000);
       let resp;
       try {
         resp = await fetch(pod.file_url, { signal: podFetchAbort.signal });
@@ -547,6 +545,20 @@ async function buildInvoicePdf({ load, invoice, podDocuments, customer }) {
       }
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const bytes = await resp.arrayBuffer();
+      return { i, pod, bytes, error: null };
+    } catch (err) {
+      return { i, pod, bytes: null, error: String(err) };
+    }
+  }));
+
+  for (const { i, pod, bytes, error } of podResults) {
+    if (error || !bytes) {
+      const errPage = pdfDoc.addPage([612, 792]);
+      errPage.drawText(`POD ${i + 1} could not be embedded: ${pod.file_name || ''}`, { x: 30, y: 740, size: 12, font: boldFont, color: rgb(0.8, 0.2, 0.2) });
+      errPage.drawText((error || 'No data').slice(0, 200), { x: 30, y: 715, size: 9, font, color: gray });
+      continue;
+    }
+    try {
       const lowerName = (pod.file_name || '').toLowerCase();
       const lowerType = (pod.file_type || '').toLowerCase();
       const isPdf = lowerType.includes('pdf') || lowerName.endsWith('.pdf');
@@ -556,7 +568,6 @@ async function buildInvoicePdf({ load, invoice, podDocuments, customer }) {
         const copied = await pdfDoc.copyPages(srcPdf, srcPdf.getPageIndices());
         copied.forEach((p) => pdfDoc.addPage(p));
       } else {
-        // JPEG / PNG image
         const isPng = lowerType.includes('png') || lowerName.endsWith('.png');
         const podPage = pdfDoc.addPage([612, 792]);
         podPage.drawText(`POD ${i + 1}: ${pod.file_name || 'attachment'}`, { x: 30, y: 762, size: 10, font: boldFont, color: navy });
