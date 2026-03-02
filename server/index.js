@@ -537,7 +537,14 @@ async function buildInvoicePdf({ load, invoice, podDocuments, customer }) {
     if (!pod.file_url) continue;
 
     try {
-      const resp = await fetch(pod.file_url);
+      const podFetchAbort = new AbortController();
+      const podFetchTimeout = setTimeout(() => podFetchAbort.abort(), 5000);
+      let resp;
+      try {
+        resp = await fetch(pod.file_url, { signal: podFetchAbort.signal });
+      } finally {
+        clearTimeout(podFetchTimeout);
+      }
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const bytes = await resp.arrayBuffer();
       const lowerName = (pod.file_name || '').toLowerCase();
