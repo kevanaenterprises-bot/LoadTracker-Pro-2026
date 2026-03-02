@@ -404,11 +404,26 @@ async function buildInvoicePdf({ load, invoice, podDocuments, customer }) {
   const gray = rgb(0.45, 0.45, 0.45);
   const lightGray = rgb(0.92, 0.92, 0.92);
 
-  const companyName = process.env.COMPANY_NAME || 'GO4 Freight Corp';
-  const companyAddress = process.env.COMPANY_ADDRESS || '';
-  const companyPhone = process.env.COMPANY_PHONE || '';
-  const companyEmail = process.env.OUTLOOK_USER || '';
-  const companyMC = process.env.COMPANY_MC || '';
+  // Pull company settings from DB (same source as the frontend preview)
+  let companyName = process.env.COMPANY_NAME || 'GO4 Farms & Cattle';
+  let companyAddress = process.env.COMPANY_ADDRESS || '';
+  let companyPhone = process.env.COMPANY_PHONE || '';
+  let companyEmail = process.env.OUTLOOK_USER || '';
+  let companyMC = process.env.COMPANY_MC || '';
+  try {
+    const settingsResult = await pool.query(
+      "SELECT key, value FROM settings WHERE key IN ('company_name','company_address','company_phone','company_email','company_mc')"
+    );
+    for (const row of settingsResult.rows) {
+      if (row.key === 'company_name' && row.value) companyName = row.value;
+      if (row.key === 'company_address' && row.value) companyAddress = row.value;
+      if (row.key === 'company_phone' && row.value) companyPhone = row.value;
+      if (row.key === 'company_email' && row.value) companyEmail = row.value;
+      if (row.key === 'company_mc' && row.value) companyMC = row.value;
+    }
+  } catch (e) {
+    console.warn('[PDF] Could not fetch company settings from DB, using env vars:', e.message);
+  }
 
   // ── Page 1: Invoice ──────────────────────────────────────────────────────
   const page = pdfDoc.addPage([612, 792]);
