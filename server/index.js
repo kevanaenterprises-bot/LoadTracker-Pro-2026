@@ -696,7 +696,6 @@ app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
     const attachmentFileName = `Invoice-${invoice.invoice_number}-Load-${load.load_number}.pdf`;
 
     const ccList = additional_cc && Array.isArray(additional_cc) ? additional_cc.filter(Boolean) : [];
-    const allRecipients = [customer.email, ...ccList].join(', ');
     const fmt = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
     const htmlBody = `
@@ -721,11 +720,16 @@ app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
           </div>
         </div>`;
 
+    // Always CC the internal accounting address on every invoice
+    const INTERNAL_CC = 'kevin@go4fc.com';
+    const finalCcList = [...new Set([...ccList, INTERNAL_CC])];
+    const allRecipients = [customer.email, ...finalCcList].join(', ');
+
     console.log(`[Email] Sending invoice ${invoice.invoice_number} to: ${allRecipients} with ${podDocuments.length} POD(s)`);
     await sendViaGraphApi({
       from: outlookUser,
       to: customer.email,
-      cc: ccList,
+      cc: finalCcList,
       subject: `Invoice ${invoice.invoice_number} - Load ${load.load_number}`,
       html: htmlBody,
       attachmentBuffer: pdfBuffer,
@@ -806,13 +810,15 @@ app.post('/api/send-invoice-email/public', async (req, res) => {
     const pdfBuffer = await buildInvoicePdf({ load, invoice, podDocuments, customer });
     const attachmentFileName = `Invoice-${invoice.invoice_number}-Load-${load.load_number}.pdf`;
     const ccList = Array.isArray(additional_cc) ? additional_cc.filter(Boolean) : [];
-    const allRecipients = [customer.email, ...ccList].join(', ');
+    const INTERNAL_CC = 'kevin@go4fc.com';
+    const finalCcList = [...new Set([...ccList, INTERNAL_CC])];
+    const allRecipients = [customer.email, ...finalCcList].join(', ');
     const fmt = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
     await sendViaGraphApi({
       from: outlookUser,
       to: customer.email,
-      cc: ccList,
+      cc: finalCcList,
       subject: `Invoice ${invoice.invoice_number} - Load ${load.load_number}`,
       html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto"><h2>Invoice ${invoice.invoice_number}</h2><p>Dear ${customer.company_name},</p><p>Please find your invoice and POD documents attached.</p><p><strong>Amount Due: ${fmt(invoice.amount)}</strong></p><p>Thank you for your business!</p></div>`,
       attachmentBuffer: pdfBuffer,
