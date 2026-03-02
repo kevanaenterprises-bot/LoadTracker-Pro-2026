@@ -643,10 +643,20 @@ app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
     const allRecipients = [customer.email, ...ccList].join(', ');
     const fmt = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+    // Resolve smtp.office365.com to IPv4 explicitly — Railway blocks IPv6 outbound
+    const smtpIpv4 = await new Promise((resolve, reject) => {
+      dns.resolve4('smtp.office365.com', (err, addresses) => {
+        if (err || !addresses || addresses.length === 0) reject(err || new Error('DNS resolve4 failed'));
+        else resolve(addresses[0]);
+      });
+    });
+    console.log(`[Email] Resolved smtp.office365.com to IPv4: ${smtpIpv4}`);
+
     const transporter = nodemailer.createTransport({
-      host: 'smtp.office365.com',
+      host: smtpIpv4,
       port: 587,
       secure: false,
+      tls: { servername: 'smtp.office365.com' },
       auth: { user: outlookUser, pass: outlookPassword },
       connectionTimeout: 15000,
       socketTimeout: 60000,
@@ -780,7 +790,10 @@ app.post('/api/send-invoice-email/public', async (req, res) => {
     const allRecipients = [customer.email, ...ccList].join(', ');
 
     const transporter = nodemailer.createTransport({
-      host: 'smtp.office365.com', port: 587, secure: false,
+      // Resolve smtp.office365.com to IPv4 explicitly — Railway blocks IPv6 outbound
+      host: await new Promise((resolve, reject) => { dns.resolve4('smtp.office365.com', (err, a) => err ? reject(err) : resolve(a[0])); }),
+      port: 587, secure: false,
+      tls: { servername: 'smtp.office365.com' },
       auth: { user: outlookUser, pass: outlookPassword },
       connectionTimeout: 15000,
       socketTimeout: 60000,
