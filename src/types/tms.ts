@@ -54,6 +54,8 @@ export interface Customer {
   billing_zip: string;
   notes: string;
   has_fuel_surcharge: boolean;
+  fuel_surcharge_rate: number;
+  pod_email?: string;
   created_at: string;
 }
 

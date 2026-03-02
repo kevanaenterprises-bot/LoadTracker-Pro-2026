@@ -85,6 +85,8 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
   const [invoiceEmailResult, setInvoiceEmailResult] = useState<{ success: boolean; message: string; canRetry?: boolean } | null>(null);
   const [showEmailConfirmModal, setShowEmailConfirmModal] = useState(false);
   const [additionalCcEmails, setAdditionalCcEmails] = useState<string>('');
+  const [invoiceLumperFee, setInvoiceLumperFee] = useState<string>('0');
+  const [invoiceExtraStopFee, setInvoiceExtraStopFee] = useState<string>('0');
   const abortControllerRef = useRef<AbortController | null>(null);
 
 
@@ -112,6 +114,8 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
       setShowInvoicePreview(false);
       setShowEmailConfirmModal(false);
       setAdditionalCcEmails('');
+      setInvoiceLumperFee('0');
+      setInvoiceExtraStopFee('0');
       setGeofenceSetupResult(null);
       setResendSmsResult(null);
       setShowUnassignConfirm(false);
@@ -639,7 +643,10 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
     setGeneratingInvoice(true);
     try {
       const invoiceNumber = await generateNextInvoiceNumber();
-      const totalAmount = Number(load.rate || 0) + Number(load.extra_stop_fee || 0) + Number(load.lumper_fee || 0);
+      const fuelSurcharge = (customer?.has_fuel_surcharge && customer?.fuel_surcharge_rate)
+        ? Number(customer.fuel_surcharge_rate) * Number(load.total_miles || 0)
+        : 0;
+      const totalAmount = Number(load.rate || 0) + Number(load.extra_stop_fee || 0) + Number(load.lumper_fee || 0) + fuelSurcharge;
 
 
       const { data: newInv, error } = await db.from('invoices').insert({
@@ -700,7 +707,9 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
           },
           body: JSON.stringify({ 
             load_id: load.id,
-            additional_cc: ccList.length > 0 ? ccList : undefined
+            additional_cc: ccList.length > 0 ? ccList : undefined,
+            lumper_fee_override: parseFloat(invoiceLumperFee) || 0,
+            extra_stop_fee_override: parseFloat(invoiceExtraStopFee) || 0,
           }),
           signal: emailAbortController.signal,
         });
@@ -1663,30 +1672,72 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                 <p className="text-xs text-slate-500 mt-1">Separate multiple emails with commas</p>
               </div>
 
-              {/* Invoice Details */}
-              <div className="pt-4 border-t border-slate-200">
-                <div className="text-sm text-slate-600 space-y-1">
-                  <div className="flex justify-between">
-                    <span>Invoice #:</span>
-                    <span className="font-medium text-slate-900">{invoice.invoice_number}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Amount:</span>
-                    <span className="font-medium text-slate-900">${invoice.amount?.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Load #:</span>
-                    <span className="font-medium text-slate-900">{load.bol_number}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Attachments:</span>
-                    <span className="font-medium text-slate-900">
-                      {documents.length > 0 
-                        ? `1 file (Invoice + ${documents.length} POD${documents.length !== 1 ? 's' : ''} combined)` 
-                        : '1 file (Invoice only)'}
-                    </span>
+              {/* Editable Charges */}
+              <div className="pt-4 border-t border-slate-200 space-y-3">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Invoice Charges</p>
+                {/* Line Haul - read only */}
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-slate-600">Line Haul</span>
+                  <span className="text-sm font-medium text-slate-900">${Number(load.rate || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                {/* Extra Stop Fee */}
+                <div className="flex items-center justify-between gap-3">
+                  <label className="text-sm text-slate-600 whitespace-nowrap">Extra Stop Fee</label>
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-slate-400">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={invoiceExtraStopFee}
+                      onChange={(e) => setInvoiceExtraStopFee(e.target.value)}
+                      className="w-28 px-2 py-1 border border-slate-300 rounded-md text-sm text-right focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                    />
                   </div>
                 </div>
+                {/* Lumper Fee */}
+                <div className="flex items-center justify-between gap-3">
+                  <label className="text-sm text-slate-600 whitespace-nowrap">Lumper Fee</label>
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-slate-400">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={invoiceLumperFee}
+                      onChange={(e) => setInvoiceLumperFee(e.target.value)}
+                      className="w-28 px-2 py-1 border border-slate-300 rounded-md text-sm text-right focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                    />
+                  </div>
+                </div>
+                {/* Fuel Surcharge (auto-computed per customer) */}
+                {customer?.has_fuel_surcharge && customer?.fuel_surcharge_rate && load.total_miles && (
+                  <div className="flex items-center justify-between text-amber-700 bg-amber-50 rounded-lg px-3 py-1.5">
+                    <span className="text-sm">
+                      Fuel Surcharge<br/>
+                      <span className="text-xs text-amber-500">${Number(customer.fuel_surcharge_rate).toFixed(4)}/mi × {Number(load.total_miles).toLocaleString()} mi</span>
+                    </span>
+                    <span className="text-sm font-medium">${(Number(customer.fuel_surcharge_rate) * Number(load.total_miles)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                )}
+                {/* Total */}
+                <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+                  <span className="text-sm font-bold text-slate-800">Total</span>
+                  <span className="text-sm font-bold text-slate-900">${(
+                    Number(load.rate || 0) +
+                    (parseFloat(invoiceExtraStopFee) || 0) +
+                    (parseFloat(invoiceLumperFee) || 0) +
+                    (customer?.has_fuel_surcharge && customer?.fuel_surcharge_rate && load.total_miles
+                      ? Number(customer.fuel_surcharge_rate) * Number(load.total_miles)
+                      : 0)
+                  ).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+
+              {/* Info */}
+              <div className="text-xs text-slate-500 flex justify-between">
+                <span>Invoice #{invoice.invoice_number} · Load #{load.bol_number}</span>
+                <span>{documents.length > 0 ? `${documents.length} POD(s) attached` : 'No PODs'}</span>
               </div>
             </div>
 
@@ -1695,6 +1746,8 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                 onClick={() => {
                   setShowEmailConfirmModal(false);
                   setAdditionalCcEmails('');
+                  setInvoiceLumperFee('0');
+                  setInvoiceExtraStopFee('0');
                 }}
                 className="flex-1 px-4 py-2 text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
               >

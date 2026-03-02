@@ -37,6 +37,7 @@ const CustomersView: React.FC<CustomersViewProps> = ({ onBack }) => {
     billing_zip: '',
     notes: '',
     has_fuel_surcharge: false,
+    fuel_surcharge_rate: 0,
   });
 
 
@@ -69,6 +70,7 @@ const CustomersView: React.FC<CustomersViewProps> = ({ onBack }) => {
         billing_zip: customer.billing_zip || '',
         notes: customer.notes || '',
         has_fuel_surcharge: customer.has_fuel_surcharge || false,
+        fuel_surcharge_rate: Number(customer.fuel_surcharge_rate) || 0,
       });
     } else {
       setEditingCustomer(null);
@@ -83,6 +85,7 @@ const CustomersView: React.FC<CustomersViewProps> = ({ onBack }) => {
         billing_zip: '',
         notes: '',
         has_fuel_surcharge: false,
+        fuel_surcharge_rate: 0,
       });
     }
     setModalOpen(true);
@@ -240,7 +243,7 @@ const CustomersView: React.FC<CustomersViewProps> = ({ onBack }) => {
                   {customer.has_fuel_surcharge && (
                     <div className="flex items-center gap-2 text-amber-600">
                       <Fuel className="w-4 h-4 text-amber-500" />
-                      <span className="font-medium">Fuel Surcharge</span>
+                      <span className="font-medium">Fuel Surcharge{customer.fuel_surcharge_rate ? ` ($${Number(customer.fuel_surcharge_rate).toFixed(4)}/mi)` : ''}</span>
                     </div>
                   )}
                 </div>
@@ -391,9 +394,24 @@ const CustomersView: React.FC<CustomersViewProps> = ({ onBack }) => {
                   </div>
                   <div>
                     <span className="text-sm font-medium text-slate-700">This customer pays a fuel surcharge</span>
-                    <p className="text-xs text-slate-500 mt-0.5">When enabled, fuel surcharge ($/mile) will be calculated and added as a line item on invoices for this customer's loads.</p>
+                    <p className="text-xs text-slate-500 mt-0.5">When enabled, fuel surcharge ($/mile × total miles) will be added as a line item on invoices.</p>
                   </div>
                 </label>
+                {formData.has_fuel_surcharge && (
+                  <div className="mt-3 flex items-center gap-3">
+                    <label className="text-sm font-medium text-slate-700 whitespace-nowrap">Rate ($/mile):</label>
+                    <input
+                      type="number"
+                      step="0.0001"
+                      min="0"
+                      value={formData.fuel_surcharge_rate}
+                      onChange={(e) => setFormData({ ...formData, fuel_surcharge_rate: parseFloat(e.target.value) || 0 })}
+                      className="w-32 px-3 py-1.5 border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-400 text-sm"
+                      placeholder="0.0000"
+                    />
+                    <span className="text-xs text-slate-500">per mile</span>
+                  </div>
+                )}
               </div>
 
               {/* Notes */}

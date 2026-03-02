@@ -395,7 +395,7 @@ app.post('/api/calculate-route', async (req, res) => {
 });
 
 // ─── Build a combined PDF: formatted invoice (page 1) + all POD docs ───────
-async function buildInvoicePdf({ load, invoice, podDocuments, customer }) {
+async function buildInvoicePdf({ load, invoice, podDocuments, customer, lumperFee, extraStopFee, fuelSurchargeAmount, fuelSurchargeRate }) {
   const pdfDoc = await PDFDocument.create();
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -513,8 +513,15 @@ async function buildInvoicePdf({ load, invoice, podDocuments, customer }) {
   const chargeRows = [
     ['Line Haul', Number(load.rate || 0)],
   ];
-  if (Number(load.extra_stop_fee || 0) > 0) chargeRows.push(['Extra Stop Fee', Number(load.extra_stop_fee)]);
-  if (Number(load.lumper_fee || 0) > 0) chargeRows.push(['Lumper Fee', Number(load.lumper_fee)]);
+  const finalExtraStop = Number(extraStopFee ?? load.extra_stop_fee ?? 0);
+  const finalLumper = Number(lumperFee ?? load.lumper_fee ?? 0);
+  const finalFuelSurcharge = Number(fuelSurchargeAmount || 0);
+  if (finalExtraStop > 0) chargeRows.push(['Extra Stop Fee', finalExtraStop]);
+  if (finalLumper > 0) chargeRows.push(['Lumper Fee', finalLumper]);
+  if (finalFuelSurcharge > 0) {
+    const rateLabel = fuelSurchargeRate ? `$${Number(fuelSurchargeRate).toFixed(4)}/mi × ${Number(load.total_miles || 0).toLocaleString()} mi` : '';
+    chargeRows.push([`Fuel Surcharge${rateLabel ? ' (' + rateLabel + ')' : ''}`, finalFuelSurcharge]);
+  }
 
   let subtotal = 0;
   for (const [desc, amt] of chargeRows) {
@@ -667,10 +674,8 @@ async function sendViaGraphApi({ from, to, cc, subject, html, attachmentBuffer, 
 // Send invoice email endpoint
 app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
   try {
-    const { load_id, additional_cc } = req.body;
+    const { load_id, additional_cc, lumper_fee_override, extra_stop_fee_override } = req.body;
     if (!load_id) return res.status(400).json({ error: 'load_id is required' });
-
-    console.log(`[Email] Building invoice PDF for load ${load_id}`);
 
     const loadResult = await pool.query(
       `SELECT id, load_number, customer_id, bol_number, origin_city, origin_state, origin_address,
@@ -683,12 +688,19 @@ app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
     const load = loadResult.rows[0];
 
     const customerResult = await pool.query(
-      'SELECT company_name, email, billing_address, billing_city, billing_state, billing_zip FROM customers WHERE id = $1',
+      'SELECT company_name, email, billing_address, billing_city, billing_state, billing_zip, has_fuel_surcharge, fuel_surcharge_rate FROM customers WHERE id = $1',
       [load.customer_id]
     );
     if (customerResult.rows.length === 0 || !customerResult.rows[0].email)
       return res.status(400).json({ error: 'Customer email not configured' });
     const customer = customerResult.rows[0];
+
+    // Compute final fee values
+    const finalLumper = lumper_fee_override !== undefined ? Number(lumper_fee_override) : Number(load.lumper_fee || 0);
+    const finalExtraStop = extra_stop_fee_override !== undefined ? Number(extra_stop_fee_override) : Number(load.extra_stop_fee || 0);
+    const fuelSurchargeRate = customer.has_fuel_surcharge ? Number(customer.fuel_surcharge_rate || 0) : 0;
+    const fuelSurchargeAmount = fuelSurchargeRate > 0 ? fuelSurchargeRate * Number(load.total_miles || 0) : 0;
+    const newTotal = Number(load.rate || 0) + finalExtraStop + finalLumper + fuelSurchargeAmount;
 
     const invoiceResult = await pool.query(
       'SELECT * FROM invoices WHERE load_id = $1 ORDER BY created_at DESC LIMIT 1',
@@ -707,8 +719,19 @@ app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
     if (!outlookUser)
       return res.status(503).json({ error: 'OUTLOOK_USER not configured on the server' });
 
-    const pdfBuffer = await buildInvoicePdf({ load, invoice, podDocuments, customer });
+    const pdfBuffer = await buildInvoicePdf({ load, invoice, podDocuments, customer, lumperFee: finalLumper, extraStopFee: finalExtraStop, fuelSurchargeAmount, fuelSurchargeRate });
     const attachmentFileName = `Invoice-${invoice.invoice_number}-Load-${load.load_number}.pdf`;
+
+    // Update invoice with actual amounts used
+    await pool.query(
+      'UPDATE invoices SET amount = $1, lumper_fee = $2, extra_stop_fee = $3, fuel_surcharge_amount = $4 WHERE id = $5',
+      [newTotal, finalLumper, finalExtraStop, fuelSurchargeAmount, invoice.id]
+    );
+    // Keep loads table in sync with final fee values
+    await pool.query(
+      'UPDATE loads SET lumper_fee = $1, extra_stop_fee = $2 WHERE id = $3',
+      [finalLumper, finalExtraStop, load_id]
+    );
 
     const ccList = additional_cc && Array.isArray(additional_cc) ? additional_cc.filter(Boolean) : [];
     const fmt = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -798,7 +821,7 @@ app.post('/api/send-invoice-email/public', async (req, res) => {
     const load = loadResult.rows[0];
 
     const customerResult = await pool.query(
-      'SELECT company_name, email, billing_address, billing_city, billing_state, billing_zip FROM customers WHERE id = $1',
+      'SELECT company_name, email, billing_address, billing_city, billing_state, billing_zip, has_fuel_surcharge, fuel_surcharge_rate FROM customers WHERE id = $1',
       [load.customer_id]
     );
     if (customerResult.rows.length === 0 || !customerResult.rows[0].email)
@@ -822,7 +845,9 @@ app.post('/api/send-invoice-email/public', async (req, res) => {
     if (!outlookUser)
       return res.status(503).json({ error: 'OUTLOOK_USER not configured on the server' });
 
-    const pdfBuffer = await buildInvoicePdf({ load, invoice, podDocuments, customer });
+    const pubFuelRate = customer.has_fuel_surcharge ? Number(customer.fuel_surcharge_rate || 0) : 0;
+    const pubFuelAmount = pubFuelRate > 0 ? pubFuelRate * Number(load.total_miles || 0) : 0;
+    const pdfBuffer = await buildInvoicePdf({ load, invoice, podDocuments, customer, lumperFee: Number(load.lumper_fee || 0), extraStopFee: Number(load.extra_stop_fee || 0), fuelSurchargeAmount: pubFuelAmount, fuelSurchargeRate: pubFuelRate });
     const attachmentFileName = `Invoice-${invoice.invoice_number}-Load-${load.load_number}.pdf`;
     const ccList = Array.isArray(additional_cc) ? additional_cc.filter(Boolean) : [];
     const INTERNAL_CC = 'kevin@go4fc.com';
