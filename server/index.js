@@ -643,6 +643,7 @@ app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
       host: 'smtp.office365.com',
       port: 587,
       secure: false,
+      family: 4,
       auth: { user: outlookUser, pass: outlookPassword },
       connectionTimeout: 15000,
       socketTimeout: 60000,
@@ -777,6 +778,7 @@ app.post('/api/send-invoice-email/public', async (req, res) => {
 
     const transporter = nodemailer.createTransport({
       host: 'smtp.office365.com', port: 587, secure: false,
+      family: 4,
       auth: { user: outlookUser, pass: outlookPassword },
       connectionTimeout: 15000,
       socketTimeout: 60000,
