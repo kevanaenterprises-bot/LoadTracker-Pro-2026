@@ -654,8 +654,8 @@ app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
 
     const transporter = nodemailer.createTransport({
       host: smtpIpv4,
-      port: 587,
-      secure: false,
+      port: 465,
+      secure: true,
       tls: { servername: 'smtp.office365.com' },
       auth: { user: outlookUser, pass: outlookPassword },
       connectionTimeout: 15000,
@@ -792,7 +792,7 @@ app.post('/api/send-invoice-email/public', async (req, res) => {
     const transporter = nodemailer.createTransport({
       // Resolve smtp.office365.com to IPv4 explicitly — Railway blocks IPv6 outbound
       host: await new Promise((resolve, reject) => { dns.resolve4('smtp.office365.com', (err, a) => err ? reject(err) : resolve(a[0])); }),
-      port: 587, secure: false,
+      port: 465, secure: true,
       tls: { servername: 'smtp.office365.com' },
       auth: { user: outlookUser, pass: outlookPassword },
       connectionTimeout: 15000,
