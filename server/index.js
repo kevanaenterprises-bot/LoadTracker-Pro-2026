@@ -9,6 +9,10 @@ import jwt from 'jsonwebtoken';
 import pg from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import dns from 'dns';
+
+// Force IPv4 DNS resolution — Railway doesn't support IPv6 outbound (ENETUNREACH)
+dns.setDefaultResultOrder('ipv4first');
 
 // Load environment variables
 dotenv.config();
@@ -643,7 +647,6 @@ app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
       host: 'smtp.office365.com',
       port: 587,
       secure: false,
-      family: 4,
       auth: { user: outlookUser, pass: outlookPassword },
       connectionTimeout: 15000,
       socketTimeout: 60000,
@@ -778,7 +781,6 @@ app.post('/api/send-invoice-email/public', async (req, res) => {
 
     const transporter = nodemailer.createTransport({
       host: 'smtp.office365.com', port: 587, secure: false,
-      family: 4,
       auth: { user: outlookUser, pass: outlookPassword },
       connectionTimeout: 15000,
       socketTimeout: 60000,
