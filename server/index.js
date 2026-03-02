@@ -592,6 +592,63 @@ async function buildInvoicePdf({ load, invoice, podDocuments, customer }) {
   return Buffer.from(await pdfDoc.save());
 }
 
+// ── Microsoft Graph API email sender (HTTPS port 443 — works on Railway) ──────
+async function sendViaGraphApi({ from, to, cc, subject, html, attachmentBuffer, attachmentFilename }) {
+  const clientId = process.env.AZURE_CLIENT_ID;
+  const clientSecret = process.env.AZURE_CLIENT_SECRET;
+  const tenantId = process.env.AZURE_TENANT_ID;
+  if (!clientId || !clientSecret || !tenantId) throw new Error('Azure Graph API credentials not configured (AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID)');
+
+  // Step 1: Get access token
+  const tokenRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      scope: 'https://graph.microsoft.com/.default',
+      grant_type: 'client_credentials',
+    }),
+  });
+  const tokenData = await tokenRes.json();
+  if (!tokenRes.ok || !tokenData.access_token) {
+    throw new Error(`Graph API token error: ${tokenData.error_description || JSON.stringify(tokenData)}`);
+  }
+
+  // Step 2: Build message
+  const toRecipients = (Array.isArray(to) ? to : [to]).map(e => ({ emailAddress: { address: e.trim() } }));
+  const ccRecipients = cc && cc.length > 0 ? (Array.isArray(cc) ? cc : [cc]).map(e => ({ emailAddress: { address: e.trim() } })) : [];
+
+  const message = {
+    subject,
+    body: { contentType: 'HTML', content: html },
+    toRecipients,
+    ...(ccRecipients.length > 0 ? { ccRecipients } : {}),
+    attachments: attachmentBuffer ? [{
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: attachmentFilename,
+      contentType: 'application/pdf',
+      contentBytes: attachmentBuffer.toString('base64'),
+    }] : [],
+  };
+
+  // Step 3: Send
+  const sendRes = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from)}/sendMail`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${tokenData.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ message, saveToSentItems: true }),
+  });
+
+  if (!sendRes.ok) {
+    const errBody = await sendRes.text();
+    throw new Error(`Graph API sendMail failed (${sendRes.status}): ${errBody}`);
+  }
+  console.log(`[Email] Graph API sent successfully (HTTP ${sendRes.status})`);
+}
+
 // Send invoice email endpoint
 app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
   try {
@@ -632,9 +689,8 @@ app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
     const podDocuments = podResult.rows;
 
     const outlookUser = process.env.OUTLOOK_USER;
-    const outlookPassword = process.env.OUTLOOK_PASSWORD;
-    if (!outlookUser || !outlookPassword)
-      return res.status(503).json({ error: 'Email credentials are not configured on the server' });
+    if (!outlookUser)
+      return res.status(503).json({ error: 'OUTLOOK_USER not configured on the server' });
 
     const pdfBuffer = await buildInvoicePdf({ load, invoice, podDocuments, customer });
     const attachmentFileName = `Invoice-${invoice.invoice_number}-Load-${load.load_number}.pdf`;
@@ -643,31 +699,7 @@ app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
     const allRecipients = [customer.email, ...ccList].join(', ');
     const fmt = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-    // Resolve smtp.office365.com to IPv4 explicitly — Railway blocks IPv6 outbound
-    const smtpIpv4 = await new Promise((resolve, reject) => {
-      dns.resolve4('smtp.office365.com', (err, addresses) => {
-        if (err || !addresses || addresses.length === 0) reject(err || new Error('DNS resolve4 failed'));
-        else resolve(addresses[0]);
-      });
-    });
-    console.log(`[Email] Resolved smtp.office365.com to IPv4: ${smtpIpv4}`);
-
-    const transporter = nodemailer.createTransport({
-      host: smtpIpv4,
-      port: 465,
-      secure: true,
-      tls: { servername: 'smtp.office365.com' },
-      auth: { user: outlookUser, pass: outlookPassword },
-      connectionTimeout: 15000,
-      socketTimeout: 60000,
-    });
-
-    const mailOptions = {
-      from: outlookUser,
-      to: customer.email,
-      cc: ccList.length > 0 ? ccList.join(', ') : undefined,
-      subject: `Invoice ${invoice.invoice_number} - Load ${load.load_number}`,
-      html: `
+    const htmlBody = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1e293b;">
           <div style="background: #0f2d72; padding: 24px 30px; border-radius: 8px 8px 0 0;">
             <h2 style="margin: 0; color: #fff; font-size: 20px;">Invoice ${invoice.invoice_number}</h2>
@@ -677,18 +709,9 @@ app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
             <p style="margin: 0 0 16px;">Dear ${customer.company_name},</p>
             <p style="margin: 0 0 20px;">Please find your invoice and POD documents attached as a single PDF file.</p>
             <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-              <tr style="background: #f1f5f9;">
-                <td style="padding: 10px 14px; font-weight: bold; border: 1px solid #e2e8f0;">Invoice Amount</td>
-                <td style="padding: 10px 14px; border: 1px solid #e2e8f0;">${fmt(invoice.amount)}</td>
-              </tr>
-              <tr>
-                <td style="padding: 10px 14px; font-weight: bold; border: 1px solid #e2e8f0;">Origin</td>
-                <td style="padding: 10px 14px; border: 1px solid #e2e8f0;">${[load.origin_city, load.origin_state].filter(Boolean).join(', ')}</td>
-              </tr>
-              <tr style="background: #f1f5f9;">
-                <td style="padding: 10px 14px; font-weight: bold; border: 1px solid #e2e8f0;">Destination</td>
-                <td style="padding: 10px 14px; border: 1px solid #e2e8f0;">${[load.dest_city, load.dest_state].filter(Boolean).join(', ')}</td>
-              </tr>
+              <tr style="background: #f1f5f9;"><td style="padding: 10px 14px; font-weight: bold; border: 1px solid #e2e8f0;">Invoice Amount</td><td style="padding: 10px 14px; border: 1px solid #e2e8f0;">${fmt(invoice.amount)}</td></tr>
+              <tr><td style="padding: 10px 14px; font-weight: bold; border: 1px solid #e2e8f0;">Origin</td><td style="padding: 10px 14px; border: 1px solid #e2e8f0;">${[load.origin_city, load.origin_state].filter(Boolean).join(', ')}</td></tr>
+              <tr style="background: #f1f5f9;"><td style="padding: 10px 14px; font-weight: bold; border: 1px solid #e2e8f0;">Destination</td><td style="padding: 10px 14px; border: 1px solid #e2e8f0;">${[load.dest_city, load.dest_state].filter(Boolean).join(', ')}</td></tr>
               ${load.pickup_date ? `<tr><td style="padding: 10px 14px; font-weight: bold; border: 1px solid #e2e8f0;">Pickup Date</td><td style="padding: 10px 14px; border: 1px solid #e2e8f0;">${new Date(load.pickup_date).toLocaleDateString('en-US')}</td></tr>` : ''}
               ${load.delivery_date ? `<tr style="background: #f1f5f9;"><td style="padding: 10px 14px; font-weight: bold; border: 1px solid #e2e8f0;">Delivery Date</td><td style="padding: 10px 14px; border: 1px solid #e2e8f0;">${new Date(load.delivery_date).toLocaleDateString('en-US')}</td></tr>` : ''}
               <tr><td style="padding: 10px 14px; font-weight: bold; border: 1px solid #e2e8f0;">POD Documents</td><td style="padding: 10px 14px; border: 1px solid #e2e8f0;">${podDocuments.length} file(s) included in attachment</td></tr>
@@ -696,20 +719,18 @@ app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
             <p style="margin: 0 0 8px; font-size: 13px; color: #64748b;">The attached PDF contains the invoice followed by all POD documents.</p>
             <p style="margin: 0; font-size: 13px; color: #64748b;">Thank you for your business!</p>
           </div>
-        </div>
-      `,
-      attachments: [
-        {
-          filename: attachmentFileName,
-          content: pdfBuffer,
-          contentType: 'application/pdf',
-        },
-      ],
-    };
+        </div>`;
 
     console.log(`[Email] Sending invoice ${invoice.invoice_number} to: ${allRecipients} with ${podDocuments.length} POD(s)`);
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`[Email] Sent successfully: ${info.messageId}`);
+    await sendViaGraphApi({
+      from: outlookUser,
+      to: customer.email,
+      cc: ccList,
+      subject: `Invoice ${invoice.invoice_number} - Load ${load.load_number}`,
+      html: htmlBody,
+      attachmentBuffer: pdfBuffer,
+      attachmentFilename: attachmentFileName,
+    });
 
     await pool.query(
       'UPDATE invoices SET emailed_at = NOW(), emailed_to = $1 WHERE id = $2',
@@ -722,7 +743,6 @@ app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
       emailed_to: allRecipients,
       load_id: load_id,
       invoice_number: invoice.invoice_number,
-      messageId: info.messageId,
     });
 
   } catch (error) {
@@ -780,31 +800,23 @@ app.post('/api/send-invoice-email/public', async (req, res) => {
     const podDocuments = podResult.rows;
 
     const outlookUser = process.env.OUTLOOK_USER;
-    const outlookPassword = process.env.OUTLOOK_PASSWORD;
-    if (!outlookUser || !outlookPassword)
-      return res.status(503).json({ error: 'Email credentials are not configured on the server' });
+    if (!outlookUser)
+      return res.status(503).json({ error: 'OUTLOOK_USER not configured on the server' });
 
     const pdfBuffer = await buildInvoicePdf({ load, invoice, podDocuments, customer });
     const attachmentFileName = `Invoice-${invoice.invoice_number}-Load-${load.load_number}.pdf`;
     const ccList = Array.isArray(additional_cc) ? additional_cc.filter(Boolean) : [];
     const allRecipients = [customer.email, ...ccList].join(', ');
-
-    const transporter = nodemailer.createTransport({
-      // Resolve smtp.office365.com to IPv4 explicitly — Railway blocks IPv6 outbound
-      host: await new Promise((resolve, reject) => { dns.resolve4('smtp.office365.com', (err, a) => err ? reject(err) : resolve(a[0])); }),
-      port: 465, secure: true,
-      tls: { servername: 'smtp.office365.com' },
-      auth: { user: outlookUser, pass: outlookPassword },
-      connectionTimeout: 15000,
-      socketTimeout: 60000,
-    });
     const fmt = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    await transporter.sendMail({
-      from: outlookUser, to: customer.email,
-      cc: ccList.length > 0 ? ccList.join(', ') : undefined,
+
+    await sendViaGraphApi({
+      from: outlookUser,
+      to: customer.email,
+      cc: ccList,
       subject: `Invoice ${invoice.invoice_number} - Load ${load.load_number}`,
       html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto"><h2>Invoice ${invoice.invoice_number}</h2><p>Dear ${customer.company_name},</p><p>Please find your invoice and POD documents attached.</p><p><strong>Amount Due: ${fmt(invoice.amount)}</strong></p><p>Thank you for your business!</p></div>`,
-      attachments: [{ filename: attachmentFileName, content: pdfBuffer, contentType: 'application/pdf' }],
+      attachmentBuffer: pdfBuffer,
+      attachmentFilename: attachmentFileName,
     });
 
     await pool.query('UPDATE invoices SET emailed_at = NOW(), emailed_to = $1 WHERE id = $2', [allRecipients, invoice.id]);
