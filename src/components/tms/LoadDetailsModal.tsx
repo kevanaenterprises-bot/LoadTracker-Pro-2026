@@ -100,9 +100,16 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
   useEffect(() => {
     if (isOpen && load) {
       currentLoadIdRef.current = load.id;
-      fetchDetails();
+      // Clear stale data from previous load immediately so old invoice/docs don't flash
+      setInvoice(null);
+      setDocuments([]);
+      setStops([]);
+      setCustomer(null);
+      // Reset all UI state
       setShowDeleteConfirm(false);
       setShowInvoicePreview(false);
+      setShowEmailConfirmModal(false);
+      setAdditionalCcEmails('');
       setGeofenceSetupResult(null);
       setResendSmsResult(null);
       setShowUnassignConfirm(false);
@@ -110,6 +117,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
       setInvoiceEmailResult(null);
       setGeneratingInvoice(false);
       setSendingInvoiceEmail(false);
+      fetchDetails();
     } else {
       currentLoadIdRef.current = null;
     }
@@ -157,7 +165,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
       .eq('load_id', load.id)
       .single();
     if (currentLoadIdRef.current !== loadId) return;
-    if (inv) setInvoice(inv);
+    setInvoice(inv ?? null); // explicitly clear if no invoice found for this load
 
     // Fetch load stops
     const { data: loadStops } = await db
