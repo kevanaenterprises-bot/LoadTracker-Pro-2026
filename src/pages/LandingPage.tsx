@@ -58,7 +58,8 @@ const LandingPage: React.FC = () => {
     }
 
     setFormSubmitting(false);
-    setShowDemo(true);
+    // Redirect to the real TMS app for the demo
+    window.location.href = '/app';
   };
 
   const features = [
