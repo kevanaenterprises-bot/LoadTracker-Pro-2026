@@ -11,6 +11,8 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import DriverPortalPage from "./pages/DriverPortalPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import DemoBanner from "./components/DemoBanner";
+import { useEffect, useState } from "react";
 
 const queryClient = new QueryClient();
 
@@ -91,6 +93,27 @@ const TokenRedirectGuard = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
+const DemoWrapper = ({ children }: { children: React.ReactNode }) => {
+  const [isDemo, setIsDemo] = useState(false);
+
+  useEffect(() => {
+    const apiUrl = import.meta.env.VITE_API_URL ||
+      (window.location.hostname === 'localhost' ? 'http://localhost:3001' : window.location.origin);
+    fetch(`${apiUrl}/api/demo-status`)
+      .then(r => r.json())
+      .then(d => { if (d.demo) setIsDemo(true); })
+      .catch(() => {});
+  }, []);
+
+  return (
+    <>
+      {isDemo && <DemoBanner />}
+      {isDemo && <div style={{ paddingTop: '40px' }}>{children}</div>}
+      {!isDemo && <>{children}</>}
+    </>
+  );
+};
+
 const App = () => (
   <ThemeProvider defaultTheme="light">
     <QueryClientProvider client={queryClient}>
@@ -98,6 +121,7 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          <DemoWrapper>
           <Routes>
             {/* Admin/TMS app routes */}
             <Route path="/" element={
@@ -127,6 +151,7 @@ const App = () => (
             {/* 404 - NEVER shows admin link, always directs to driver portal */}
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </DemoWrapper>
         </BrowserRouter>
       </TooltipProvider>
     </QueryClientProvider>

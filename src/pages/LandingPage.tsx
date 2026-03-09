@@ -14,7 +14,7 @@ import {
 const LandingPage: React.FC = () => {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [formData, setFormData] = useState({ name: '', company: '', email: '', fleetSize: '' });
+  const [formData, setFormData] = useState({ name: '', company: '', phone: '', email: '', address: '', fleetSize: '' });
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [showDemo, setShowDemo] = useState(false);
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
@@ -48,7 +48,9 @@ const LandingPage: React.FC = () => {
       await db.from('demo_visitors').insert({
         name: formData.name.trim(),
         company_name: formData.company.trim() || null,
+        phone: formData.phone.trim() || null,
         email: formData.email.trim() || null,
+        address: formData.address.trim() || null,
         fleet_size: formData.fleetSize || null,
       });
     } catch (err) {
@@ -776,8 +778,9 @@ const LandingPage: React.FC = () => {
 
               <div>
                 <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8 lg:p-10">
-                  <h3 className="text-2xl font-bold text-slate-900 mb-2">Enter the Demo</h3>
-                  <p className="text-slate-500 mb-6">Just your name is required. Everything else is optional.</p>
+                  <h3 className="text-2xl font-bold text-slate-900 mb-2">Sign the Visitor Log</h3>
+                  <p className="text-slate-500 mb-1">Your name is the only thing required.</p>
+                  <p className="text-xs text-slate-400 mb-5">This is for our records only — <strong>nobody will contact you</strong>. We believe LoadTracker PRO sells itself. No salesman, no follow-up calls, no emails. Explore for up to an hour, completely on your own. If you want to talk after, reach Kevin at <a href="mailto:kevin@go4fc.com" className="text-blue-600 hover:underline font-medium">kevin@go4fc.com</a>.</p>
 
                   <form onSubmit={handleDemoSubmit} className="space-y-5">
                     <div>
@@ -804,12 +807,34 @@ const LandingPage: React.FC = () => {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">Email (optional)</label>
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">Phone</label>
+                      <input
+                        type="tel"
+                        value={formData.phone}
+                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                        placeholder="(555) 123-4567"
+                        className="w-full px-4 py-3 border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">Email</label>
                       <input
                         type="email"
                         value={formData.email}
                         onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                         placeholder="john@smithtrucking.com"
+                        className="w-full px-4 py-3 border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">Address</label>
+                      <input
+                        type="text"
+                        value={formData.address}
+                        onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                        placeholder="City, State"
                         className="w-full px-4 py-3 border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
@@ -842,14 +867,14 @@ const LandingPage: React.FC = () => {
                         </>
                       ) : (
                         <>
-                          Launch Interactive Demo
+                          Launch Demo — 1 Hour Free
                           <ArrowRight className="w-5 h-5" />
                         </>
                       )}
                     </button>
 
                     <p className="text-xs text-slate-400 text-center mt-3">
-                      We will NOT contact you. This form just logs your visit so you can access the demo.
+                      🔒 For our records only. We will never contact you without your request.
                     </p>
                   </form>
                 </div>

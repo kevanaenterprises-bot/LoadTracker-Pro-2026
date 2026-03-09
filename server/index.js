@@ -46,6 +46,10 @@ if (!JWT_SECRET) {
 // bcrypt cost factor – configurable for resource-constrained environments
 const BCRYPT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS || '12', 10);
 
+// Demo mode — blocks all outbound email/SMS when true
+const DEMO_MODE = process.env.DEMO_MODE === 'true';
+if (DEMO_MODE) console.log('🎮 DEMO MODE enabled — outbound email/SMS blocked');
+
 // --- JWT authentication middleware ---
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
@@ -81,6 +85,11 @@ app.use(limiter);
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Demo mode status endpoint
+app.get('/api/demo-status', (req, res) => {
+  res.json({ demo: DEMO_MODE });
+});
 
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
@@ -859,6 +868,10 @@ async function buildInvoicePdf({ load, invoice, podDocuments, customer, lumperFe
 
 // ── Microsoft Graph API email sender (HTTPS port 443 — works on Railway) ──────
 async function sendViaGraphApi({ from, to, cc, subject, html, attachmentBuffer, attachmentFilename }) {
+  if (DEMO_MODE) {
+    console.log(`[DEMO] Email blocked — would have sent to: ${Array.isArray(to) ? to.join(', ') : to} | Subject: ${subject}`);
+    return; // silently succeed
+  }
   const clientId = process.env.AZURE_CLIENT_ID;
   const clientSecret = process.env.AZURE_CLIENT_SECRET;
   const tenantId = process.env.AZURE_TENANT_ID;
