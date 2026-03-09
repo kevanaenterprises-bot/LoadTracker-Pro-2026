@@ -245,38 +245,33 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       [uuidv4(), user.id, resetToken, expiresAt]
     );
 
-    const appUrl = process.env.APP_URL || process.env.RAILWAY_PUBLIC_DOMAIN
-      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-      : 'https://loadtrackerpro.up.railway.app';
+    const appUrl = process.env.APP_URL
+      || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null)
+      || 'https://loadtracker-pro-2026-production.up.railway.app';
     const resetLink = `${appUrl}/reset-password?token=${resetToken}`;
 
-    const transporter = nodemailer.createTransport({
-      host: 'smtp.office365.com',
-      port: 587,
-      secure: false,
-      auth: { user: process.env.OUTLOOK_USER, pass: process.env.OUTLOOK_PASSWORD },
-      tls: { ciphers: 'SSLv3' },
-    });
+    const resetHtml = `
+      <div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;">
+        <div style="background:#0f2d72;padding:24px 30px;border-radius:8px 8px 0 0;">
+          <h2 style="margin:0;color:#fff;font-size:20px;">🔐 Password Reset</h2>
+        </div>
+        <div style="border:1px solid #e2e8f0;border-top:none;padding:24px 30px;border-radius:0 0 8px 8px;">
+          <p>Hi ${user.name},</p>
+          <p>Click the button below to reset your password. This link expires in <strong>1 hour</strong>.</p>
+          <div style="text-align:center;margin:28px 0;">
+            <a href="${resetLink}" style="background:#0f2d72;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;">Reset Password</a>
+          </div>
+          <p style="font-size:12px;color:#64748b;">If you didn't request this, you can safely ignore this email.</p>
+          <p style="font-size:12px;color:#64748b;">Or copy this link: ${resetLink}</p>
+        </div>
+      </div>`;
 
-    await transporter.sendMail({
-      from: `"LoadTracker Pro" <${process.env.OUTLOOK_USER}>`,
+    await sendViaGraphApi({
+      from: process.env.OUTLOOK_USER,
       to: normalizedEmail,
+      cc: [],
       subject: 'Password Reset - LoadTracker Pro',
-      html: `
-        <div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;">
-          <div style="background:#0f2d72;padding:24px 30px;border-radius:8px 8px 0 0;">
-            <h2 style="margin:0;color:#fff;font-size:20px;">🔐 Password Reset</h2>
-          </div>
-          <div style="border:1px solid #e2e8f0;border-top:none;padding:24px 30px;border-radius:0 0 8px 8px;">
-            <p>Hi ${user.name},</p>
-            <p>Click the button below to reset your password. This link expires in <strong>1 hour</strong>.</p>
-            <div style="text-align:center;margin:28px 0;">
-              <a href="${resetLink}" style="background:#0f2d72;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;">Reset Password</a>
-            </div>
-            <p style="font-size:12px;color:#64748b;">If you didn't request this, you can safely ignore this email.</p>
-            <p style="font-size:12px;color:#64748b;">Or copy this link: ${resetLink}</p>
-          </div>
-        </div>`,
+      html: resetHtml,
     });
 
     res.json({ success: true, message: 'If that email exists, a reset link has been sent.' });
