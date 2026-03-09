@@ -147,15 +147,56 @@ const HistoryTourSection: React.FC<HistoryTourSectionProps> = ({ driverId, gpsPo
     setShowDetails(true);
 
     try {
-      // TODO: Implement text-to-speech narration for historical markers
-      // This feature was previously using a Supabase Edge Function
-      // Consider implementing with a third-party TTS service or browser Web Speech API
-      console.log('Text-to-speech narration not yet implemented for PostgreSQL migration');
-      setAudioError('Text-to-speech narration is temporarily unavailable');
-      setIsLoadingAudio(false);
+      // Build narration text from marker content
+      const narrationText = [
+        marker.title,
+        marker.subtitle ? `— ${marker.subtitle}` : '',
+        marker.city && marker.state ? `Located in ${marker.city}, ${marker.state}.` : '',
+        marker.description,
+      ].filter(Boolean).join(' ');
+
+      const apiUrl = import.meta.env.VITE_API_URL ||
+        (window.location.hostname === 'localhost' ? 'http://localhost:3001' : window.location.origin);
+
+      const response = await fetch(`${apiUrl}/api/tts/narrate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: narrationText }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || 'TTS request failed');
+      }
+
+      // Stream audio blob and play it
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      // Revoke previous blob URL to free memory
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current);
+      }
+      audioUrlRef.current = audioUrl;
+
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+
+      audio.onplay = () => { setIsNarrating(true); setIsLoadingAudio(false); };
+      audio.onended = () => {
+        setIsNarrating(false);
+        markMarkerAsHeard(marker);
+      };
+      audio.onerror = () => {
+        setIsNarrating(false);
+        setIsLoadingAudio(false);
+        setAudioError('Audio playback failed');
+      };
+
+      await audio.play();
     } catch (error) {
       console.error('Error with narration:', error);
-      setAudioError('Could not load narration');
+      setAudioError(error instanceof Error ? error.message : 'Could not load narration');
       setIsLoadingAudio(false);
     }
   };

@@ -147,25 +147,34 @@ const DriverDashboard: React.FC = () => {
     try {
       const location = await getDriverLocation();
 
-      const { data, error } = await db.functions.invoke('here-webhook', {
+      const token = localStorage.getItem('tms_token');
+      const apiUrl = import.meta.env.VITE_API_URL ||
+        (window.location.hostname === 'localhost' ? 'http://localhost:3001' : window.location.origin);
 
-        body: {
-          action: 'record',
+      const response = await fetch(`${apiUrl}/api/geofence/record`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
           load_id: loadId,
           stop_id: stopId,
           driver_lat: location?.lat || null,
           driver_lng: location?.lng || null,
           event_type: eventType,
-        },
+        }),
       });
 
-      if (error) {
-        console.error('Geofence record error:', error);
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.error('Geofence record error:', data);
         alert('Failed to record timestamp. Please try again.');
       } else {
         // Refresh timestamps
         await fetchStopsAndTimestamps(loadId);
-        
+
         if (data?.verified) {
           setGpsStatus('Location verified within geofence!');
         } else if (location) {
@@ -173,7 +182,7 @@ const DriverDashboard: React.FC = () => {
         } else {
           setGpsStatus('Timestamp recorded (no GPS available)');
         }
-        
+
         setTimeout(() => setGpsStatus(''), 3000);
       }
     } catch (error) {

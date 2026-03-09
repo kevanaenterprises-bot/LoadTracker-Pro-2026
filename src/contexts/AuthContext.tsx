@@ -21,6 +21,7 @@ interface AuthContextType {
   signup: (email: string, password: string, name: string, role: 'admin' | 'driver') => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
   isAdmin: boolean;
   isDriver: boolean;
 }
@@ -138,12 +139,37 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setUser(null);
   };
 
-  // Password reset is not yet implemented server-side; returns a friendly message
-  const resetPassword = async (_email: string): Promise<{ success: boolean; error?: string }> => {
-    return {
-      success: false,
-      error: 'Password reset is not available. Please contact your administrator.',
-    };
+  const resetPassword = async (email: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const response = await fetch(`${API_URL}/api/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.toLowerCase().trim() }),
+      });
+      const data = await response.json();
+      if (!response.ok) return { success: false, error: data.error || 'Failed to send reset email' };
+      return { success: true };
+    } catch (err) {
+      console.error('Reset password error:', err);
+      return { success: false, error: 'An unexpected error occurred' };
+    }
+  };
+
+  const changePassword = async (currentPassword: string, newPassword: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const token = localStorage.getItem('tms_token');
+      const response = await fetch(`${API_URL}/api/auth/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+      });
+      const data = await response.json();
+      if (!response.ok) return { success: false, error: data.error || 'Failed to change password' };
+      return { success: true };
+    } catch (err) {
+      console.error('Change password error:', err);
+      return { success: false, error: 'An unexpected error occurred' };
+    }
   };
 
   const value: AuthContextType = {
@@ -153,6 +179,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     signup,
     logout,
     resetPassword,
+    changePassword,
     isAdmin: user?.role === 'admin',
     isDriver: user?.role === 'driver',
   };

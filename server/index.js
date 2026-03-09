@@ -178,6 +178,11 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(403).json({ error: 'Account is disabled' });
     }
 
+    // Guard against accounts with no password set (legacy / incomplete accounts)
+    if (!user.password_hash) {
+      return res.status(401).json({ error: 'Account has no password set. Please contact your administrator to reset your password.' });
+    }
+
     // Verify password
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
@@ -208,6 +213,249 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// POST /api/auth/forgot-password  — send a reset link via Outlook
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'email is required' });
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const result = await pool.query(
+      'SELECT id, name FROM users WHERE email = $1 AND is_active = true',
+      [normalizedEmail]
+    );
+
+    // Always return success to prevent user enumeration
+    if (result.rows.length === 0) {
+      return res.json({ success: true, message: 'If that email exists, a reset link has been sent.' });
+    }
+
+    const user = result.rows[0];
+    const resetToken = uuidv4();
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    // Store reset token
+    await pool.query(
+      `INSERT INTO password_reset_tokens (id, user_id, token, expires_at, used)
+       VALUES ($1, $2, $3, $4, false)
+       ON CONFLICT (user_id) DO UPDATE SET token = $3, expires_at = $4, used = false`,
+      [uuidv4(), user.id, resetToken, expiresAt]
+    );
+
+    const appUrl = process.env.APP_URL || process.env.RAILWAY_PUBLIC_DOMAIN
+      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+      : 'https://loadtrackerpro.up.railway.app';
+    const resetLink = `${appUrl}/reset-password?token=${resetToken}`;
+
+    const transporter = nodemailer.createTransport({
+      host: 'smtp.office365.com',
+      port: 587,
+      secure: false,
+      auth: { user: process.env.OUTLOOK_USER, pass: process.env.OUTLOOK_PASSWORD },
+      tls: { ciphers: 'SSLv3' },
+    });
+
+    await transporter.sendMail({
+      from: `"LoadTracker Pro" <${process.env.OUTLOOK_USER}>`,
+      to: normalizedEmail,
+      subject: 'Password Reset - LoadTracker Pro',
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;">
+          <div style="background:#0f2d72;padding:24px 30px;border-radius:8px 8px 0 0;">
+            <h2 style="margin:0;color:#fff;font-size:20px;">🔐 Password Reset</h2>
+          </div>
+          <div style="border:1px solid #e2e8f0;border-top:none;padding:24px 30px;border-radius:0 0 8px 8px;">
+            <p>Hi ${user.name},</p>
+            <p>Click the button below to reset your password. This link expires in <strong>1 hour</strong>.</p>
+            <div style="text-align:center;margin:28px 0;">
+              <a href="${resetLink}" style="background:#0f2d72;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;">Reset Password</a>
+            </div>
+            <p style="font-size:12px;color:#64748b;">If you didn't request this, you can safely ignore this email.</p>
+            <p style="font-size:12px;color:#64748b;">Or copy this link: ${resetLink}</p>
+          </div>
+        </div>`,
+    });
+
+    res.json({ success: true, message: 'If that email exists, a reset link has been sent.' });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ error: 'Failed to send reset email' });
+  }
+});
+
+// POST /api/auth/reset-password  — consume token and set new password
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) return res.status(400).json({ error: 'token and password are required' });
+    if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+    const tokenResult = await pool.query(
+      `SELECT t.id, t.user_id, t.expires_at, t.used, u.email, u.name
+       FROM password_reset_tokens t JOIN users u ON u.id = t.user_id
+       WHERE t.token = $1`,
+      [token]
+    );
+
+    if (tokenResult.rows.length === 0) return res.status(400).json({ error: 'Invalid or expired reset link' });
+
+    const row = tokenResult.rows[0];
+    if (row.used) return res.status(400).json({ error: 'This reset link has already been used' });
+    if (new Date(row.expires_at) < new Date()) return res.status(400).json({ error: 'This reset link has expired' });
+
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+
+    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, row.user_id]);
+    await pool.query('UPDATE password_reset_tokens SET used = true WHERE id = $1', [row.id]);
+
+    res.json({ success: true, message: 'Password updated successfully' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
+
+// POST /api/auth/change-password  — authenticated user changes own password
+app.post('/api/auth/change-password', authenticateToken, async (req, res) => {
+  try {
+    const { current_password, new_password } = req.body;
+    if (!current_password || !new_password) return res.status(400).json({ error: 'current_password and new_password are required' });
+    if (new_password.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters' });
+
+    const result = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    const user = result.rows[0];
+    if (user.password_hash) {
+      const valid = await bcrypt.compare(current_password, user.password_hash);
+      if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    const passwordHash = await bcrypt.hash(new_password, BCRYPT_ROUNDS);
+    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, req.user.id]);
+
+    res.json({ success: true, message: 'Password changed successfully' });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({ error: 'Failed to change password' });
+  }
+});
+
+// POST /api/geofence/record  — driver records arrive/depart at a stop
+app.post('/api/geofence/record', async (req, res) => {
+  try {
+    const { load_id, stop_id, driver_lat, driver_lng, event_type } = req.body;
+    if (!load_id || !event_type) return res.status(400).json({ error: 'load_id and event_type are required' });
+
+    // Determine stop details for geofence check
+    let verified = false;
+    let stopType = 'unknown';
+
+    if (stop_id) {
+      const stopResult = await pool.query(
+        `SELECT ls.stop_type, l.latitude, l.longitude, l.geofence_radius
+         FROM load_stops ls
+         LEFT JOIN locations l ON l.id = ls.location_id
+         WHERE ls.id = $1`,
+        [stop_id]
+      );
+      if (stopResult.rows.length > 0) {
+        const stop = stopResult.rows[0];
+        stopType = stop.stop_type;
+        // Check geofence if we have GPS and location coords
+        if (driver_lat && driver_lng && stop.latitude && stop.longitude) {
+          const R = 6371000;
+          const dLat = (stop.latitude - driver_lat) * Math.PI / 180;
+          const dLon = (stop.longitude - driver_lng) * Math.PI / 180;
+          const a = Math.sin(dLat/2)**2 + Math.cos(driver_lat * Math.PI/180) * Math.cos(stop.latitude * Math.PI/180) * Math.sin(dLon/2)**2;
+          const distanceMeters = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          const radius = stop.geofence_radius || 500;
+          verified = distanceMeters <= radius;
+        }
+      }
+    }
+
+    // Upsert the timestamp (one arrived + one departed per stop/event combo)
+    const tsId = uuidv4();
+    await pool.query(
+      `INSERT INTO geofence_timestamps
+         (id, load_id, stop_id, stop_type, event_type, timestamp, latitude, longitude, verified, verification_method, created_at)
+       VALUES ($1,$2,$3,$4,$5,NOW(),$6,$7,$8,$9,NOW())
+       ON CONFLICT (load_id, stop_id, event_type)
+       DO UPDATE SET timestamp=NOW(), latitude=$6, longitude=$7, verified=$8, verification_method=$9`,
+      [tsId, load_id, stop_id || null, stopType, event_type,
+       driver_lat || null, driver_lng || null, verified,
+       driver_lat ? (verified ? 'gps-geofence' : 'gps-manual') : 'manual']
+    );
+
+    // Fetch updated timestamps for this load
+    const updated = await pool.query(
+      'SELECT * FROM geofence_timestamps WHERE load_id = $1 ORDER BY timestamp ASC',
+      [load_id]
+    );
+
+    res.json({ success: true, verified, timestamps: updated.rows });
+  } catch (error) {
+    console.error('Geofence record error:', error);
+    res.status(500).json({ error: 'Failed to record geofence event' });
+  }
+});
+
+// GET /api/geofence/:load_id  — fetch all timestamps for a load
+app.get('/api/geofence/:load_id', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM geofence_timestamps WHERE load_id = $1 ORDER BY timestamp ASC',
+      [req.params.load_id]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Geofence fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch timestamps' });
+  }
+});
+
+// POST /api/tts/narrate  — ElevenLabs TTS proxy for Road Tour feature
+app.post('/api/tts/narrate', async (req, res) => {
+  try {
+    const { text, voice_id } = req.body;
+    if (!text) return res.status(400).json({ error: 'text is required' });
+
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    if (!apiKey) return res.status(503).json({ error: 'TTS not configured on server' });
+
+    // Use provided voice_id or a good default (Rachel - clear, narrator voice)
+    const voiceId = voice_id || process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM';
+
+    const ttsResponse = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': apiKey,
+        'Content-Type': 'application/json',
+        'Accept': 'audio/mpeg',
+      },
+      body: JSON.stringify({
+        text: text.slice(0, 2500), // ElevenLabs limit safety
+        model_id: 'eleven_turbo_v2',
+        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+      }),
+    });
+
+    if (!ttsResponse.ok) {
+      const err = await ttsResponse.text();
+      console.error('ElevenLabs error:', err);
+      return res.status(ttsResponse.status).json({ error: 'TTS service error' });
+    }
+
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    ttsResponse.body.pipe(res);
+  } catch (error) {
+    console.error('TTS error:', error);
+    res.status(500).json({ error: 'Failed to generate audio' });
   }
 });
 
