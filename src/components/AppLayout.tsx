@@ -66,6 +66,7 @@ const AppLayout: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dataVersion, setDataVersion] = useState(0);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -448,6 +449,7 @@ const AppLayout: React.FC = () => {
 
   const handlePaymentRecorded = () => {
     fetchData();
+    setDataVersion(v => v + 1);
   };
 
   // Calculate today's invoiced total for pipeline
@@ -549,7 +551,7 @@ const AppLayout: React.FC = () => {
 
 
 
-  if (currentView === 'paid-loads') return <PaidLoadsView onBack={() => setCurrentView('dashboard')} />;
+  if (currentView === 'paid-loads') return <PaidLoadsView onBack={() => setCurrentView('dashboard')} key={dataVersion} />;
   if (currentView === 'drivers') return <DriversView onBack={() => setCurrentView('dashboard')} />;
   if (currentView === 'rate-matrix') return <RateMatrixView onBack={() => setCurrentView('dashboard')} />;
   if (currentView === 'customers') return <CustomersView onBack={() => setCurrentView('dashboard')} />;
