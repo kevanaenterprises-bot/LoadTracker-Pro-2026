@@ -31,6 +31,27 @@ const CHRISTY_VOICE_ID  = process.env.CHRISTY_VOICE_ID  || '60d9ae36173d415db7a3
 // Load system prompt
 const SYSTEM_PROMPT = fs.readFileSync(path.join(__dirname, 'system-prompt.md'), 'utf8');
 
+// Load today's briefing if available
+function getDailyContext() {
+  try {
+    const briefingFile = path.join(__dirname, 'daily-context.json');
+    if (!fs.existsSync(briefingFile)) return '';
+    const b = JSON.parse(fs.readFileSync(briefingFile, 'utf8'));
+    // Only use if generated today
+    const genDate = new Date(b.generated_at);
+    const now = new Date();
+    if (now - genDate > 36 * 60 * 60 * 1000) return ''; // stale if >36h old
+
+    let ctx = `\n\n## Today's Briefing (${b.date})\n`;
+    if (b.weather) ctx += `- Weather in Dallas: ${b.weather}\n`;
+    if (b.diesel_price) ctx += `- Current diesel price: ${b.diesel_price}\n`;
+    if (b.trucking_news?.length) ctx += `- Trucking news: ${b.trucking_news.join(' | ')}\n`;
+    if (b.today_in_history?.length) ctx += `- Today in history: ${b.today_in_history.join(' | ')}\n`;
+    if (b.talking_points?.length) ctx += `\nNatural talking points you can weave in:\n${b.talking_points.map(p => `- "${p}"`).join('\n')}\n`;
+    return ctx;
+  } catch { return ''; }
+}
+
 // ── Day/Night check ─────────────────────────────────────────────────────────
 function isOfficeHours() {
   // 8am–6pm CST (UTC-6)
@@ -161,7 +182,7 @@ app.post('/api/christy/chat', async (req, res) => {
 
     // Build conversation history
     const messages = [
-      { role: 'system', content: SYSTEM_PROMPT + `\n\nCurrent time: ${officeHours ? 'Office hours (8am-6pm CST) — you are fully present and energetic.' : 'After hours (6pm-8am CST) — you are in warm out-of-office mode.'}` },
+      { role: 'system', content: SYSTEM_PROMPT + getDailyContext() + `\n\nCurrent time: ${officeHours ? 'Office hours (8am-6pm CST) — you are fully present and energetic.' : 'After hours (6pm-8am CST) — you are in warm out-of-office mode.'}` },
       ...history.slice(-8), // Keep last 8 exchanges for context
       { role: 'user', content: message },
     ];
