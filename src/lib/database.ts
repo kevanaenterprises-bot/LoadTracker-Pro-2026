@@ -26,6 +26,12 @@ export async function query<T = any>(text: string, params?: any[]): Promise<Quer
       body: JSON.stringify({ text, params }),
     });
 
+    // Token expired or invalid — fire a global event so AuthContext can log out cleanly
+    if (response.status === 401 || response.status === 403) {
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+      throw new Error('Session expired. Please log in again.');
+    }
+
     if (!response.ok) {
       const error = await response.json();
       throw new Error(error.error || 'Query failed');

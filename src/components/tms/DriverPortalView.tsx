@@ -111,7 +111,23 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
-      const token = params.get('token');
+      let token = params.get('token');
+
+      // If no URL token, try to restore from saved tracking session in localStorage
+      // This handles the case where driver closes app and reopens without the URL
+      if (!token) {
+        try {
+          const saved = localStorage.getItem(TRACKING_SESSION_KEY);
+          if (saved) {
+            const session = JSON.parse(saved);
+            if (session?.token && session?.active) {
+              token = session.token;
+              console.log('[DriverPortal] Restoring session from localStorage token');
+            }
+          }
+        } catch { /* non-critical */ }
+      }
+
       setPortalToken(token);
       if (token) {
         setLoading(true);

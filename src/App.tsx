@@ -10,6 +10,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import DriverPortalPage from "./pages/DriverPortalPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 
 const queryClient = new QueryClient();
 
@@ -110,6 +111,9 @@ const App = () => (
               </TokenRedirectGuard>
             } />
             
+            {/* Password reset route */}
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
+
             {/* Driver portal routes - exact path and wildcard to catch any sub-paths */}
             <Route path="/driver-portal" element={<DriverPortalPage />} />
             <Route path="/driver-portal/*" element={<DriverPortalPage />} />

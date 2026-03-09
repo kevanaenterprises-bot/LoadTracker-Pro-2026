@@ -58,6 +58,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
     }
     setLoading(false);
+
+    // Listen for 401/403 from API calls — auto-logout when token expires
+    const handleUnauthorized = () => {
+      localStorage.removeItem('tms_user');
+      localStorage.removeItem('tms_token');
+      setUser(null);
+    };
+    window.addEventListener('auth:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
   }, []);
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {

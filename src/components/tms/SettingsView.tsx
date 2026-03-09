@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/supabaseCompat';
+import { useAuth } from '@/contexts/AuthContext';
 import { 
   ArrowLeft, Settings, Phone, CheckCircle, 
   AlertCircle, MessageSquare, TestTube, Loader2, Info,
   Radar, Globe, Copy, Wifi, ShieldCheck, MapPin, Activity,
-  FileText, Mail, ToggleLeft, ToggleRight, Send, ExternalLink, AtSign
+  FileText, Mail, ToggleLeft, ToggleRight, Send, ExternalLink, AtSign, Lock
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -20,6 +21,37 @@ interface GeofenceStats {
 }
 
 const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
+  const { changePassword } = useAuth();
+
+  // Change password state
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordResult, setPasswordResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordResult(null);
+    if (newPassword.length < 8) {
+      setPasswordResult({ success: false, message: 'New password must be at least 8 characters.' });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordResult({ success: false, message: 'New passwords do not match.' });
+      return;
+    }
+    setChangingPassword(true);
+    const result = await changePassword(currentPassword, newPassword);
+    setChangingPassword(false);
+    if (result.success) {
+      setPasswordResult({ success: true, message: 'Password changed successfully!' });
+      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+    } else {
+      setPasswordResult({ success: false, message: result.error || 'Failed to change password.' });
+    }
+  };
+
   const [testPhone, setTestPhone] = useState('');
   const [sendingTest, setSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -427,6 +459,73 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
             </div>
           </div>
         </div>
+
+        {/* Change Password */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="p-6 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center">
+                <Lock className="w-5 h-5 text-slate-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-slate-800">Change Password</h3>
+                <p className="text-sm text-slate-500">Update your account password</p>
+              </div>
+            </div>
+          </div>
+          <div className="p-6">
+            <form onSubmit={handleChangePassword} className="space-y-4 max-w-md">
+              {passwordResult && (
+                <div className={`flex items-center gap-2 p-3 rounded-xl text-sm ${passwordResult.success ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-red-50 border border-red-200 text-red-700'}`}>
+                  {passwordResult.success ? <CheckCircle className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
+                  {passwordResult.message}
+                </div>
+              )}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Current Password</label>
+                <input
+                  type="password"
+                  value={currentPassword}
+                  onChange={e => setCurrentPassword(e.target.value)}
+                  required
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter current password"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">New Password</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  required
+                  minLength={8}
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Minimum 8 characters"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Confirm New Password</label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
+                  required
+                  className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Repeat new password"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={changingPassword}
+                className="flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white text-sm font-medium rounded-xl transition-colors"
+              >
+                {changingPassword ? <><Loader2 className="w-4 h-4 animate-spin" /> Updating...</> : <><Lock className="w-4 h-4" /> Update Password</>}
+              </button>
+            </form>
+          </div>
+        </div>
+
       </main>
     </div>
   );
