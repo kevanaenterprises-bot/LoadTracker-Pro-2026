@@ -613,14 +613,14 @@ const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack,
                                         onClick={() => handleReuploadPod(item)}
                                         disabled={reuploadingLoadId === item.load.id}
                                         className="inline-flex items-center gap-1 px-2.5 py-1.5 text-red-700 bg-red-50 border border-red-200 rounded-lg text-xs font-medium hover:bg-red-100 transition-colors disabled:opacity-50"
-                                        title="Delete broken PODs and reset for re-upload"
+                                        title="Delete broken POD files"
                                       >
                                         {reuploadingLoadId === item.load.id ? (
                                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
                                         ) : (
-                                          <RotateCcw className="w-3.5 h-3.5" />
+                                          <Trash2 className="w-3.5 h-3.5" />
                                         )}
-                                        <span className="hidden lg:inline">Re-upload</span>
+                                        <span className="hidden lg:inline">Delete Broken PODs</span>
                                       </button>
                                     )}
 
