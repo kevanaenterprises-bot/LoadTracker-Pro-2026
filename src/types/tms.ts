@@ -198,6 +198,7 @@ export interface PODDocument {
   file_url: string;
   file_type: string;
   uploaded_at: string;
+  r2_key?: string;
 }
 
 

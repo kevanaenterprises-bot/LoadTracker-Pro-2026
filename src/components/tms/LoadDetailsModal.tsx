@@ -498,18 +498,34 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
 
   const handleDeletePod = async (doc: PODDocument) => {
     if (!confirm(`Delete "${doc.file_name}"? This cannot be undone.`)) return;
+    const apiUrl = import.meta.env.VITE_API_URL || 'https://loadtracker-pro-2026-production.up.railway.app';
     try {
-      // Remove from Supabase storage
-      if (doc.file_url) {
-        const urlObj = new URL(doc.file_url);
-        // Path is like /storage/v1/object/public/pod-documents/<load_id>/<file>
-        const pathParts = urlObj.pathname.split('/storage/v1/object/public/pod-documents/');
-        if (pathParts[1]) {
-          await db.storage.from('pod-documents').remove([pathParts[1]]);
-        }
+      // Extract R2 key — prefer stored r2_key, fallback to extracting from URL
+      let r2Key = doc.r2_key;
+      if (!r2Key && doc.file_url) {
+        try {
+          const urlObj = new URL(doc.file_url);
+          // Try to extract key from URL path if it contains loadtracker/pods
+          const match = urlObj.pathname.match(/\/(loadtracker\/pods\/.+?)(?:\?|$)/);
+          if (match) r2Key = decodeURIComponent(match[1]);
+        } catch { /* ignore parse errors */ }
       }
-      // Remove DB record
-      await db.from('pod_documents').delete().eq('id', doc.id);
+
+      if (r2Key) {
+        // Delete from R2 via backend
+        await fetch(`${apiUrl}/api/pods/delete`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          },
+          body: JSON.stringify({ key: r2Key, docId: doc.id }),
+        });
+      } else {
+        // Fallback: just remove the DB record via Supabase compat layer
+        await db.from('pod_documents').delete().eq('id', doc.id);
+      }
+
       setDocuments(prev => prev.filter(d => d.id !== doc.id));
     } catch (err: any) {
       alert('Failed to delete: ' + (err.message || err));
@@ -518,26 +534,71 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
 
   const handleUploadPod = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!load || !e.target.files?.length) return;
+    const apiUrl = import.meta.env.VITE_API_URL || 'https://loadtracker-pro-2026-production.up.railway.app';
     setUploadingPod(true);
     try {
       for (const file of Array.from(e.target.files)) {
-        const ext = file.name.split('.').pop() || 'jpg';
-        const storagePath = `${load.id}/${Date.now()}.${ext}`;
-        await db.storage.from('pod-documents').upload(storagePath, file, { contentType: file.type, upsert: true });
-        const { data: urlData } = db.storage.from('pod-documents').getPublicUrl(storagePath);
-        const { data: newDoc } = await db.from('pod_documents').insert({
-          load_id: load.id,
-          file_name: file.name,
-          file_url: urlData.publicUrl,
-          file_type: file.type,
-        }).select().single();
-        if (newDoc) setDocuments(prev => [...prev, newDoc as PODDocument]);
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('loadId', load.id);
+
+        const uploadRes = await fetch(`${apiUrl}/api/pods/upload`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          },
+          body: formData,
+        });
+
+        if (!uploadRes.ok) {
+          const errData = await uploadRes.json().catch(() => ({}));
+          throw new Error(errData.error || `Upload failed: ${uploadRes.status}`);
+        }
+
+        const { url, key, doc } = await uploadRes.json();
+        if (doc) {
+          setDocuments(prev => [...prev, doc as PODDocument]);
+        } else {
+          // Backend inserted in DB — construct a minimal local record
+          setDocuments(prev => [...prev, {
+            id: String(Date.now()),
+            load_id: load.id,
+            file_name: file.name,
+            file_url: url,
+            file_type: file.type,
+            uploaded_at: new Date().toISOString(),
+            r2_key: key,
+          }]);
+        }
       }
     } catch (err: any) {
       alert('Upload failed: ' + (err.message || err));
     } finally {
       setUploadingPod(false);
       if (podFileInputRef.current) podFileInputRef.current.value = '';
+    }
+  };
+
+  const handleViewPod = async (doc: PODDocument) => {
+    const apiUrl = import.meta.env.VITE_API_URL || 'https://loadtracker-pro-2026-production.up.railway.app';
+    try {
+      // If we have an r2_key, fetch a fresh presigned URL
+      if (doc.r2_key) {
+        const res = await fetch(`${apiUrl}/api/pods/view/${encodeURIComponent(doc.r2_key)}`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+        });
+        if (res.ok) {
+          const { url } = await res.json();
+          window.open(url, '_blank');
+          return;
+        }
+      }
+      // Fallback: open file_url directly (works for legacy Supabase URLs or already-signed URLs)
+      if (doc.file_url) {
+        window.open(doc.file_url, '_blank');
+      }
+    } catch (err: any) {
+      alert('Could not open file: ' + (err.message || err));
     }
   };
 
@@ -1462,16 +1523,14 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                       key={doc.id}
                       className="flex items-center justify-between p-3 bg-white rounded-lg border border-slate-200 hover:border-blue-300 hover:bg-blue-50 transition-colors"
                     >
-                      <a
-                        href={doc.file_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-3 flex-1 min-w-0"
+                      <button
+                        onClick={() => handleViewPod(doc)}
+                        className="flex items-center gap-3 flex-1 min-w-0 text-left"
                       >
                         <FileText className="w-5 h-5 text-slate-400 shrink-0" />
                         <span className="text-sm font-medium text-slate-700 truncate">{doc.file_name}</span>
                         <Download className="w-4 h-4 text-slate-400 shrink-0" />
-                      </a>
+                      </button>
                       <button
                         onClick={() => handleDeletePod(doc)}
                         className="ml-3 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors shrink-0"

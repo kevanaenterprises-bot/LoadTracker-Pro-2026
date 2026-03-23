@@ -10,6 +10,9 @@ import pg from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import dns from 'dns';
+import multer from 'multer';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // Force IPv4 DNS resolution — Railway doesn't support IPv6 outbound (ENETUNREACH)
 dns.setDefaultResultOrder('ipv4first');
@@ -49,6 +52,28 @@ const BCRYPT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS || '12', 10);
 // Demo mode — blocks all outbound email/SMS when true
 const DEMO_MODE = process.env.DEMO_MODE === 'true';
 if (DEMO_MODE) console.log('🎮 DEMO MODE enabled — outbound email/SMS blocked');
+
+// ─── Cloudflare R2 Configuration ────────────────────────────────────────────
+const R2_BUCKET = process.env.R2_BUCKET || 'rethread';
+const r2Client = new S3Client({
+  region: 'auto',
+  endpoint: process.env.R2_ENDPOINT || 'https://84138a632ee02ff226c3e3e3710c5439.r2.cloudflarestorage.com',
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY || '97691f8ac523d8183c443194e1555878',
+    secretAccessKey: process.env.R2_SECRET_KEY || 'ffaffefe275daa0bc0d8d99c11414246a9122a7ad51d461a5276782696efb497',
+  },
+});
+
+// Multer — memory storage for R2 uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB max
+});
+if (process.env.R2_ACCESS_KEY) {
+  console.log('✅ Cloudflare R2 storage configured');
+} else {
+  console.log('⚠️  R2_ACCESS_KEY not set – using hardcoded fallback (set env vars in production)');
+}
 
 // --- JWT authentication middleware ---
 function authenticateToken(req, res, next) {
@@ -811,13 +836,23 @@ async function buildInvoicePdf({ load, invoice, podDocuments, customer, lumperFe
 
   // ── Pages 2+: POD documents (download all in parallel, then add pages in order) ──
   const podResults = await Promise.all(podDocuments.map(async (pod, i) => {
-    if (!pod.file_url) return { i, pod, bytes: null, error: 'No URL' };
+    // Determine the URL to fetch — for R2 files, generate a fresh presigned URL
+    let fetchUrl = pod.file_url;
+    if (pod.r2_key) {
+      try {
+        const cmd = new GetObjectCommand({ Bucket: R2_BUCKET, Key: pod.r2_key });
+        fetchUrl = await getSignedUrl(r2Client, cmd, { expiresIn: 600 });
+      } catch (signErr) {
+        return { i, pod, bytes: null, error: `R2 sign error: ${signErr.message}` };
+      }
+    }
+    if (!fetchUrl) return { i, pod, bytes: null, error: 'No URL' };
     try {
       const podFetchAbort = new AbortController();
       const podFetchTimeout = setTimeout(() => podFetchAbort.abort(), 10000);
       let resp;
       try {
-        resp = await fetch(pod.file_url, { signal: podFetchAbort.signal });
+        resp = await fetch(fetchUrl, { signal: podFetchAbort.signal });
       } finally {
         clearTimeout(podFetchTimeout);
       }
@@ -966,7 +1001,7 @@ app.post('/api/send-invoice-email', authenticateToken, async (req, res) => {
     const invoice = invoiceResult.rows[0];
 
     const podResult = await pool.query(
-      'SELECT id, file_name, file_url, file_type FROM pod_documents WHERE load_id = $1 ORDER BY uploaded_at ASC',
+      'SELECT id, file_name, file_url, file_type, r2_key FROM pod_documents WHERE load_id = $1 ORDER BY uploaded_at ASC',
       [load_id]
     );
     const podDocuments = podResult.rows;
@@ -1092,7 +1127,7 @@ app.post('/api/send-invoice-email/public', async (req, res) => {
     const invoice = invoiceResult.rows[0];
 
     const podResult = await pool.query(
-      'SELECT id, file_name, file_url, file_type FROM pod_documents WHERE load_id = $1 ORDER BY uploaded_at ASC',
+      'SELECT id, file_name, file_url, file_type, r2_key FROM pod_documents WHERE load_id = $1 ORDER BY uploaded_at ASC',
       [load_id]
     );
     const podDocuments = podResult.rows;
@@ -1131,6 +1166,80 @@ app.post('/api/send-invoice-email/public', async (req, res) => {
   } catch (error) {
     console.error('Public send email error:', error);
     res.status(error.statusCode || 500).json({ error: error.message || 'Failed to send invoice email' });
+  }
+});
+
+// ─── POD Document Storage Endpoints (Cloudflare R2) ─────────────────────────
+
+// POST /api/pods/upload — upload a POD file to R2, record in DB
+app.post('/api/pods/upload', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file provided' });
+    const { loadId } = req.body;
+    if (!loadId) return res.status(400).json({ error: 'loadId is required' });
+
+    const timestamp = Date.now();
+    const safeName = req.file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+    const key = `loadtracker/pods/${loadId}/${timestamp}-${safeName}`;
+
+    await r2Client.send(new PutObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+      Body: req.file.buffer,
+      ContentType: req.file.mimetype,
+    }));
+
+    // Build a presigned URL (1 hour) to return as the initial file_url
+    const viewCommand = new GetObjectCommand({ Bucket: R2_BUCKET, Key: key });
+    const signedUrl = await getSignedUrl(r2Client, viewCommand, { expiresIn: 3600 });
+
+    // Insert record into pod_documents
+    const result = await pool.query(
+      `INSERT INTO pod_documents (load_id, file_name, file_url, file_type, r2_key)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [loadId, req.file.originalname, signedUrl, req.file.mimetype, key]
+    );
+
+    res.json({ url: signedUrl, key, doc: result.rows[0] });
+  } catch (err) {
+    console.error('[POD Upload]', err);
+    res.status(500).json({ error: err.message || 'Upload failed' });
+  }
+});
+
+// GET /api/pods/view/:key — generate a 1-hour presigned URL for a POD in R2
+app.get('/api/pods/view/:key(*)', authenticateToken, async (req, res) => {
+  try {
+    const key = req.params.key;
+    const command = new GetObjectCommand({ Bucket: R2_BUCKET, Key: key });
+    const url = await getSignedUrl(r2Client, command, { expiresIn: 3600 });
+    res.json({ url });
+  } catch (err) {
+    console.error('[POD View]', err);
+    res.status(500).json({ error: err.message || 'Failed to generate view URL' });
+  }
+});
+
+// DELETE /api/pods/delete — delete a POD from R2 and the database
+app.delete('/api/pods/delete', authenticateToken, async (req, res) => {
+  try {
+    const { key, docId } = req.body;
+    if (!key) return res.status(400).json({ error: 'key is required' });
+
+    // Delete from R2
+    await r2Client.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+
+    // Delete DB record if docId provided; otherwise match by r2_key
+    if (docId) {
+      await pool.query('DELETE FROM pod_documents WHERE id = $1', [docId]);
+    } else {
+      await pool.query('DELETE FROM pod_documents WHERE r2_key = $1', [key]);
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[POD Delete]', err);
+    res.status(500).json({ error: err.message || 'Delete failed' });
   }
 });
 
