@@ -252,7 +252,7 @@ const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack,
 
   const handleReuploadPod = async (item: ARInvoice) => {
     if (!confirm(
-      `This will delete all ${item.podDocuments.length} POD record(s) for load ${item.load.load_number}, remove the invoice, and reset the load to IN_TRANSIT so the driver can re-upload.\n\nContinue?`
+      `This will delete the POD document(s) for load ${item.load.load_number} so they can be re-uploaded.\n\nNote: The invoice will be kept intact.\n\nContinue?`
     )) return;
 
     setReuploadingLoadId(item.load.id);
@@ -275,19 +275,13 @@ const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack,
         if (!error) deletedCount++;
       }
 
-      // Delete the invoice
-      await db.from('invoices').delete().eq('id', item.invoice.id);
-
-      // Reset load to IN_TRANSIT
-      await db
-        .from('loads')
-        .update({ status: 'IN_TRANSIT', delivered_at: null })
-        .eq('id', item.load.id);
+      // NOTE: Invoice is intentionally kept intact - only POD files are removed for re-upload
+      // Load status stays as INVOICED so invoice remains accessible
 
       setReuploadResult({
         loadId: item.load.id,
         success: true,
-        message: `${item.load.load_number}: ${deletedCount} POD(s) deleted, invoice removed, load reset to IN_TRANSIT.`,
+        message: `${item.load.load_number}: ${deletedCount} POD(s) deleted. Invoice kept intact — driver can now re-upload POD.`,
       });
 
       // Refresh data
