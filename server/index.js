@@ -10,6 +10,7 @@ import pg from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import dns from 'dns';
+import Jimp from 'jimp';
 
 // Force IPv4 DNS resolution — Railway doesn't support IPv6 outbound (ENETUNREACH)
 dns.setDefaultResultOrder('ipv4first');
@@ -557,59 +558,101 @@ async function buildInvoicePdf({ load, invoice, podDocuments, customer, lumperFe
     page.drawText(`POD documents attached: ${podDocuments.length} file(s) follow on the next page(s).`, { x: 30, y, size: 9, font, color: gray });
   }
 
-  // ── Pages 2+: POD documents (download all in parallel, then add pages in order) ──
-  const podResults = await Promise.all(podDocuments.map(async (pod, i) => {
-    if (!pod.file_url) return { i, pod, bytes: null, error: 'No URL' };
+// ── Pages 2+: POD documents (download all in parallel, then add pages in order) ──
+const podResults = await Promise.all(podDocuments.map(async (pod, i) => {
+  if (!pod.file_url) return { i, pod, bytes: null, error: 'No URL' };
+  try {
+    const podFetchAbort = new AbortController();
+    const podFetchTimeout = setTimeout(() => podFetchAbort.abort(), 10000);
+    let resp;
     try {
-      const podFetchAbort = new AbortController();
-      const podFetchTimeout = setTimeout(() => podFetchAbort.abort(), 10000);
-      let resp;
-      try {
-        resp = await fetch(pod.file_url, { signal: podFetchAbort.signal });
-      } finally {
-        clearTimeout(podFetchTimeout);
-      }
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const bytes = await resp.arrayBuffer();
-      return { i, pod, bytes, error: null };
-    } catch (err) {
-      return { i, pod, bytes: null, error: String(err) };
+      resp = await fetch(pod.file_url, { signal: podFetchAbort.signal });
+    } finally {
+      clearTimeout(podFetchTimeout);
     }
-  }));
-
-  for (const { i, pod, bytes, error } of podResults) {
-    if (error || !bytes) {
-      const errPage = pdfDoc.addPage([612, 792]);
-      errPage.drawText(`POD ${i + 1} could not be embedded: ${pod.file_name || ''}`, { x: 30, y: 740, size: 12, font: boldFont, color: rgb(0.8, 0.2, 0.2) });
-      errPage.drawText((error || 'No data').slice(0, 200), { x: 30, y: 715, size: 9, font, color: gray });
-      continue;
-    }
-    try {
-      const lowerName = (pod.file_name || '').toLowerCase();
-      const lowerType = (pod.file_type || '').toLowerCase();
-      const isPdf = lowerType.includes('pdf') || lowerName.endsWith('.pdf');
-
-      if (isPdf) {
-        const srcPdf = await PDFDocument.load(bytes);
-        const copied = await pdfDoc.copyPages(srcPdf, srcPdf.getPageIndices());
-        copied.forEach((p) => pdfDoc.addPage(p));
-      } else {
-        const isPng = lowerType.includes('png') || lowerName.endsWith('.png');
-        const podPage = pdfDoc.addPage([612, 792]);
-        podPage.drawText(`POD ${i + 1}: ${pod.file_name || 'attachment'}`, { x: 30, y: 762, size: 10, font: boldFont, color: navy });
-        podPage.drawText(`Load ${load.load_number}  |  Invoice ${invoice.invoice_number}`, { x: 30, y: 748, size: 8, font, color: gray });
-        const image = isPng ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
-        const maxW = 552, maxH = 700;
-        const scale = Math.min(maxW / image.width, maxH / image.height, 1);
-        const dw = image.width * scale, dh = image.height * scale;
-        podPage.drawImage(image, { x: (612 - dw) / 2, y: 740 - dh, width: dw, height: dh });
-      }
-    } catch (err) {
-      const errPage = pdfDoc.addPage([612, 792]);
-      errPage.drawText(`POD ${i + 1} could not be embedded: ${pod.file_name || ''}`, { x: 30, y: 740, size: 12, font: boldFont, color: rgb(0.8, 0.2, 0.2) });
-      errPage.drawText(String(err).slice(0, 200), { x: 30, y: 715, size: 9, font, color: gray });
-    }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const bytes = await resp.arrayBuffer();
+    return { i, pod, bytes, error: null };
+  } catch (err) {
+    return { i, pod, bytes: null, error: String(err) };
   }
+}));
+
+for (const { i, pod, bytes, error } of podResults) {
+  if (error || !bytes) {
+    const errPage = pdfDoc.addPage([612, 792]);
+    errPage.drawText(`POD ${i + 1} could not be embedded: ${pod.file_name || ''}`, { x: 30, y: 740, size: 12, font: boldFont, color: rgb(0.8, 0.2, 0.2) });
+    errPage.drawText((error || 'No data').slice(0, 200), { x: 30, y: 715, size: 9, font, color: gray });
+    continue;
+  }
+  try {
+    const lowerName = (pod.file_name || '').toLowerCase();
+    const lowerType = (pod.file_type || '').toLowerCase();
+    const isPdf = lowerType.includes('pdf') || lowerName.endsWith('.pdf');
+    const isJpg = lowerType.includes('jpg') || lowerType.includes('jpeg') || lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg');
+    const isPng = lowerType.includes('png') || lowerName.endsWith('.png');
+
+    if (isPdf) {
+      // Load existing PDF
+      const srcPdf = await PDFDocument.load(bytes);
+      const copied = await pdfDoc.copyPages(srcPdf, srcPdf.getPageIndices());
+      copied.forEach((p) => pdfDoc.addPage(p));
+    } else if (isJpg || isPng) {
+      // Convert image to Jimp for processing
+      const jimpImage = await Jimp.read(Buffer.from(bytes));
+      const imgWidth = jimpImage.bitmap.width;
+      const imgHeight = jimpImage.bitmap.height;
+      const isLandscape = imgWidth > imgHeight;
+
+      // Use landscape page if image is landscape, otherwise portrait
+      const [pageWidth, pageHeight] = isLandscape ? [792, 612] : [612, 792];
+      const podPage = pdfDoc.addPage([pageWidth, pageHeight]);
+
+      // Add metadata header
+      podPage.drawText(`POD ${i + 1}: ${pod.file_name || 'attachment'}`, {
+        x: 30,
+        y: pageHeight - 30,
+        size: 10,
+        font: boldFont,
+        color: navy
+      });
+      podPage.drawText(`Load ${load.load_number}  |  Invoice ${invoice.invoice_number}`, {
+        x: 30,
+        y: pageHeight - 45,
+        size: 8,
+        font,
+        color: gray
+      });
+
+      // Embed image into PDF
+      const embeddedImage = isJpg ? await pdfDoc.embedJpg(jimpImage.bitmap.data) : await pdfDoc.embedPng(jimpImage.bitmap.data);
+
+      // Calculate scaling to fit image on page
+      const maxW = pageWidth - 60;  // 30px margins
+      const maxH = pageHeight - 80; // Account for header
+      const scale = Math.min(maxW / imgWidth, maxH / imgHeight, 1);
+      const dw = imgWidth * scale;
+      const dh = imgHeight * scale;
+
+      // Center image on page
+      const xPos = (pageWidth - dw) / 2;
+      const yPos = pageHeight - 80 - dh;
+
+      podPage.drawImage(embeddedImage, {
+        x: xPos,
+        y: yPos,
+        width: dw,
+        height: dh
+      });
+    }
+  } catch (err) {
+    const errPage = pdfDoc.addPage([612, 792]);
+    errPage.drawText(`POD ${i + 1} could not be embedded: ${pod.file_name || ''}`, { x: 30, y: 740, size: 12, font: boldFont, color: rgb(0.8, 0.2, 0.2) });
+    errPage.drawText(String(err).slice(0, 200), { x: 30, y: 715, size: 9, font, color: gray });
+  }
+}
+
+return Buffer.from(await pdfDoc.save());
 
   return Buffer.from(await pdfDoc.save());
 }

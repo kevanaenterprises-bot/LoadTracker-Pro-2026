@@ -63,6 +63,7 @@
     "express-rate-limit": "^8.2.1",
     "highlight.js": "^11.9.0",
     "input-otp": "^1.2.4",
+    "jimp": "^1.6.0",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.462.0",
     "marked": "^12.0.1",
