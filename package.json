@@ -14,14 +14,14 @@
     "migrate": "node scripts/migrate.js",
     "hash-passwords": "node scripts/hash-passwords.js",
     "clear-users": "node scripts/clear-users.js",
-    "start": "npm run build && node server/index.js"
+    "start": "npm ci --legacy-peer-deps && npm run build && node server/index.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1014.0",
     "@aws-sdk/s3-request-presigner": "^3.1014.0",
     "@hookform/resolvers": "^3.9.0",
     "@radix-ui/react-accordion": "^1.2.0",
-    "@radix-ui/react-alert-dialog": "^1.1.1",
+    "@radix-ui/react-alert-dialog": "^1.1.1"
     "@radix-ui/react-aspect-ratio": "^1.1.0",
     "@radix-ui/react-avatar": "^1.1.0",
     "@radix-ui/react-checkbox": "^1.1.1",
