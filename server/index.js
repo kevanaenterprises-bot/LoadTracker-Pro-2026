@@ -9,11 +9,50 @@ import jwt from 'jsonwebtoken';
 import pg from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-import { createCanvas } from 'canvas';
+import { createCanvas, loadImage } from 'canvas';
 import dns from 'dns';
 
 // Force IPv4 DNS resolution — Railway doesn't support IPv6 outbound (ENETUNREACH)
 dns.setDefaultResultOrder('ipv4first');
+
+function getJpegOrientation(buffer) {
+  try {
+    const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    if (view.getUint16(0, false) !== 0xffd8) return 1;
+
+    let offset = 2;
+    while (offset < view.byteLength) {
+      const marker = view.getUint16(offset, false);
+      offset += 2;
+      if (marker === 0xffe1) {
+        const length = view.getUint16(offset, false);
+        offset += 2;
+        if (view.getUint32(offset, false) !== 0x45786966) return 1; // 'Exif'
+        offset += 6;
+        const little = view.getUint16(offset, false) === 0x4949;
+        offset += 2;
+        if (view.getUint16(offset, little) !== 0x002a) return 1;
+        const firstIFD = view.getUint32(offset + 4, little);
+        let entryOffset = offset + firstIFD;
+        const entries = view.getUint16(entryOffset, little);
+        entryOffset += 2;
+        for (let i = 0; i < entries; i += 1) {
+          const tag = view.getUint16(entryOffset, little);
+          if (tag === 0x0112) {
+            return view.getUint16(entryOffset + 8, little);
+          }
+          entryOffset += 12;
+        }
+        return 1;
+      }
+      if ((marker & 0xff00) !== 0xff00) break;
+      offset += view.getUint16(offset, false);
+    }
+  } catch {
+    return 1;
+  }
+  return 1;
+}
 
 // Load environment variables
 dotenv.config();
@@ -598,36 +637,103 @@ async function buildInvoicePdf({ load, invoice, podDocuments, customer, lumperFe
         const copied = await pdfDoc.copyPages(srcPdf, srcPdf.getPageIndices());
         copied.forEach((p) => pdfDoc.addPage(p));
       } else if (isJpg || isPng) {
-        // Convert image to PDF page
-        const image = isJpg ? await pdfDoc.embedJpg(bytes) : await pdfDoc.embedPng(bytes);
+        const imageSource = await loadImage(Buffer.from(bytes));
+        const orientation = isJpg ? getJpegOrientation(Buffer.from(bytes)) : 1;
+        let rotate = 0;
+        let flipX = false;
+        let flipY = false;
 
-        // Determine orientation
-        const imgWidth = image.width;
-        const imgHeight = image.height;
-        const isLandscape = imgWidth > imgHeight;
+        switch (orientation) {
+          case 2:
+            flipX = true;
+            break;
+          case 3:
+            rotate = 180;
+            break;
+          case 4:
+            flipY = true;
+            break;
+          case 5:
+            rotate = 90;
+            flipX = true;
+            break;
+          case 6:
+            rotate = 90;
+            break;
+          case 7:
+            rotate = 270;
+            flipX = true;
+            break;
+          case 8:
+            rotate = 270;
+            break;
+          default:
+            break;
+        }
 
-        // Create page with correct orientation
-        const [pageWidth, pageHeight] = isLandscape ? [792, 612] : [612, 792];
+        const pageWidth = 612;
+        const pageHeight = 792;
         const podPage = pdfDoc.addPage([pageWidth, pageHeight]);
 
-        // Add header
-        podPage.drawText(`POD ${i + 1}: ${pod.file_name || 'attachment'}`, { 
-          x: 30, y: pageHeight - 30, size: 10, font: boldFont, color: navy 
+        podPage.drawText(`POD ${i + 1}: ${pod.file_name || 'attachment'}`, {
+          x: 30,
+          y: pageHeight - 30,
+          size: 10,
+          font: boldFont,
+          color: navy,
         });
-        podPage.drawText(`Load ${load.load_number}  |  Invoice ${invoice.invoice_number}`, { 
-          x: 30, y: pageHeight - 45, size: 8, font, color: gray 
+        podPage.drawText(`Load ${load.load_number}  |  Invoice ${invoice.invoice_number}`, {
+          x: 30,
+          y: pageHeight - 45,
+          size: 8,
+          font,
+          color: gray,
         });
 
-        // Scale and center image
+        const rawWidth = imageSource.width;
+        const rawHeight = imageSource.height;
+        let rotated = rotate === 90 || rotate === 270;
+        let frameWidth = rotated ? rawHeight : rawWidth;
+        let frameHeight = rotated ? rawWidth : rawHeight;
+
+        // If the image remains landscape after EXIF rotation, force portrait orientation
+        if (frameWidth > frameHeight) {
+          rotate = (rotate + 90) % 360;
+          rotated = rotate === 90 || rotate === 270;
+          frameWidth = rotated ? rawHeight : rawWidth;
+          frameHeight = rotated ? rawWidth : rawHeight;
+        }
+
         const maxW = pageWidth - 60;
         const maxH = pageHeight - 80;
-        const scale = Math.min(maxW / imgWidth, maxH / imgHeight, 1);
-        const dw = imgWidth * scale;
-        const dh = imgHeight * scale;
-        const xPos = (pageWidth - dw) / 2;
-        const yPos = pageHeight - 80 - dh;
+        const scale = Math.min(maxW / frameWidth, maxH / frameHeight, 1);
+        const renderWidth = rawWidth * scale;
+        const renderHeight = rawHeight * scale;
+        const canvasWidth = rotate === 90 || rotate === 270 ? renderHeight : renderWidth;
+        const canvasHeight = rotate === 90 || rotate === 270 ? renderWidth : renderHeight;
 
-        podPage.drawImage(image, { x: xPos, y: yPos, width: dw, height: dh });
+        const canvas = createCanvas(canvasWidth, canvasHeight);
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+        ctx.save();
+        ctx.translate(canvasWidth / 2, canvasHeight / 2);
+        if (rotate) ctx.rotate((rotate * Math.PI) / 180);
+        ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+        ctx.drawImage(imageSource, -renderWidth / 2, -renderHeight / 2, renderWidth, renderHeight);
+        ctx.restore();
+
+        const pngBuffer = canvas.toBuffer('image/png');
+        const embeddedImage = await pdfDoc.embedPng(pngBuffer);
+        const xPos = (pageWidth - canvasWidth) / 2;
+        const yPos = pageHeight - 80 - canvasHeight;
+
+        podPage.drawImage(embeddedImage, {
+          x: xPos,
+          y: yPos,
+          width: canvasWidth,
+          height: canvasHeight,
+        });
       }
     } catch (err) {
       const errPage = pdfDoc.addPage([612, 792]);
