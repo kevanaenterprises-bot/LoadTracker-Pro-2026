@@ -41,7 +41,17 @@ const bucketColors: Record<string, { bg: string; text: string; border: string; h
   '90+': { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', headerBg: 'bg-red-100' },
 };
 
-const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack, onRecordPayment }) => {
+// ... all the imports at the top ...
+
+// ... the interfaces (ARInvoice, bucketLabels, bucketColors) ...
+
+// 👇 PASTE THE NEW COMPONENT RIGHT HERE
+const EditableInvoiceNumber: React.FC<{
+  ...
+}> = ...
+
+// 👇 THEN the existing main component starts
+const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack, onRecordPayment }) => {const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack, onRecordPayment }) => {
   const [arInvoices, setArInvoices] = useState<ARInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -546,11 +556,19 @@ const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack,
                                 className={`transition-colors ${hasBrokenPods ? 'bg-red-50/50 hover:bg-red-50' : 'hover:bg-slate-50'}`}
                               >
                                 <td className="px-4 py-3">
-                                  <span className="font-mono text-sm font-semibold text-slate-800">
-                                    {item.invoice.invoice_number}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3">
+  <EditableInvoiceNumber
+    invoice={item.invoice}
+    onSaved={(newNumber) => {
+      setArInvoices(prev =>
+        prev.map(i =>
+          i.invoice.id === item.invoice.id
+            ? { ...i, invoice: { ...i.invoice, invoice_number: newNumber } }
+            : i
+        )
+      );
+    }}
+  />
+</td>                                <td className="px-4 py-3">
                                   <div className="text-sm">
                                     <p className="font-medium text-slate-800">{item.load?.load_number}</p>
                                     <p className="text-xs text-slate-500">
