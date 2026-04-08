@@ -40,7 +40,7 @@ const bucketColors: Record<string, { bg: string; text: string; border: string; h
   '61-90': { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200', headerBg: 'bg-orange-100' },
   '90+': { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', headerBg: 'bg-red-100' },
 };
-   const EditableInvoiceNumber: React.FC<{
+const EditableInvoiceNumber: React.FC<{
   invoice: Invoice;
   onSaved: (newNumber: string) => void;
 }> = ({ invoice, onSaved }) => {
