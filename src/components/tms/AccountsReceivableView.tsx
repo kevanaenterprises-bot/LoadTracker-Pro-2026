@@ -790,4 +790,4 @@ const bucketColors: Record<string, { bg: string; text: string; border: string; h
   );
 };
 
-export default AccountsReceivableView;
+
