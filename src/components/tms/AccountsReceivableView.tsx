@@ -40,18 +40,62 @@ const bucketColors: Record<string, { bg: string; text: string; border: string; h
   '61-90': { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200', headerBg: 'bg-orange-100' },
   '90+': { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', headerBg: 'bg-red-100' },
 };
+   const EditableInvoiceNumber: React.FC<{
+  invoice: Invoice;
+  onSaved: (newNumber: string) => void;
+}> = ({ invoice, onSaved }) => {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(invoice.invoice_number);
+  const [saving, setSaving] = useState(false);
 
-// ... all the imports at the top ...
+  const handleSave = async () => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === invoice.invoice_number) { setEditing(false); return; }
+    setSaving(true);
+    try {
+      const { error } = await db.from('invoices').update({ invoice_number: trimmed }).eq('id', invoice.id);
+      if (error) { alert(`Failed to update invoice number: ${error.message}`); return; }
+      onSaved(trimmed);
+      setEditing(false);
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
 
-// ... the interfaces (ARInvoice, bucketLabels, bucketColors) ...
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1">
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value.toUpperCase())}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setEditing(false); }}
+          className="font-mono text-sm font-semibold text-slate-800 border border-indigo-300 rounded px-2 py-0.5 w-32 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+        />
+        <button onClick={handleSave} disabled={saving} className="p-1 text-emerald-600 hover:text-emerald-800">
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+        </button>
+        <button onClick={() => { setValue(invoice.invoice_number); setEditing(false); }} className="p-1 text-slate-400 hover:text-slate-600">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  }
 
-// 👇 PASTE THE NEW COMPONENT RIGHT HERE
-const EditableInvoiceNumber: React.FC<{
-  ...
-}> = ...
-
-// 👇 THEN the existing main component starts
-const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack, onRecordPayment }) => {const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack, onRecordPayment }) => {
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      className="font-mono text-sm font-semibold text-slate-800 hover:text-indigo-600 hover:underline flex items-center gap-1 group"
+      title="Click to edit invoice number"
+    >
+      {invoice.invoice_number}
+      <FileText className="w-3 h-3 text-slate-300 group-hover:text-indigo-400" />
+    </button>
+  );
+}; 
+  const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack, onRecordPayment }) => {const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack, onRecordPayment }) => {const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack, onRecordPayment }) => {
   const [arInvoices, setArInvoices] = useState<ARInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
