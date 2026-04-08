@@ -40,6 +40,7 @@ const bucketColors: Record<string, { bg: string; text: string; border: string; h
   '61-90': { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200', headerBg: 'bg-orange-100' },
   '90+': { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', headerBg: 'bg-red-100' },
 };
+
 const EditableInvoiceNumber: React.FC<{
   invoice: Invoice;
   onSaved: (newNumber: string) => void;
@@ -94,8 +95,9 @@ const EditableInvoiceNumber: React.FC<{
       <FileText className="w-3 h-3 text-slate-300 group-hover:text-indigo-400" />
     </button>
   );
-}; 
-  const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack, onRecordPayment }) => {const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack, onRecordPayment }) => {const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack, onRecordPayment }) => {
+};
+
+const AccountsReceivableView: React.FC<AccountsReceivableViewProps> = ({ onBack, onRecordPayment }) => {
   const [arInvoices, setArInvoices] = useState<ARInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -106,16 +108,13 @@ const EditableInvoiceNumber: React.FC<{
     '90+': true,
   });
 
-  // Invoice Preview Modal state
   const [previewLoad, setPreviewLoad] = useState<Load | null>(null);
   const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
   const [showPreview, setShowPreview] = useState(false);
 
-  // Re-upload state
   const [reuploadingLoadId, setReuploadingLoadId] = useState<string | null>(null);
   const [reuploadResult, setReuploadResult] = useState<{ loadId: string; success: boolean; message: string } | null>(null);
 
-  // Attachments modal state
   const [showAttachmentsModal, setShowAttachmentsModal] = useState(false);
   const [selectedAttachmentItem, setSelectedAttachmentItem] = useState<ARInvoice | null>(null);
 
@@ -126,7 +125,6 @@ const EditableInvoiceNumber: React.FC<{
   const fetchARData = async () => {
     setLoading(true);
 
-    // Fetch all invoices that are PENDING (not fully paid)
     const { data: invoices } = await db
       .from('invoices')
       .select('*')
@@ -139,14 +137,12 @@ const EditableInvoiceNumber: React.FC<{
       return;
     }
 
-    // Fetch associated loads with customer data
     const loadIds = invoices.map(inv => inv.load_id);
     const { data: loads } = await db
       .from('loads')
       .select('*, customer:customers(*), driver:drivers(*)')
       .in('id', loadIds);
 
-    // Fetch all payments for these invoices
     const invoiceIds = invoices.map(inv => inv.id);
     const { data: payments } = await db
       .from('payments')
@@ -154,7 +150,6 @@ const EditableInvoiceNumber: React.FC<{
       .in('invoice_id', invoiceIds)
       .order('payment_date', { ascending: true });
 
-    // Fetch all POD documents for these loads
     const { data: allPodDocs } = await db
       .from('pod_documents')
       .select('*')
@@ -194,12 +189,9 @@ const EditableInvoiceNumber: React.FC<{
 
     setArInvoices(arItems);
     setLoading(false);
-
-    // Asynchronously check POD file validity
     checkPodFilesValidity(arItems);
   };
 
-  // Check if POD image URLs are actually accessible
   const checkPodFilesValidity = async (items: ARInvoice[]) => {
     const updatedItems = [...items];
 
@@ -210,17 +202,13 @@ const EditableInvoiceNumber: React.FC<{
       let brokenCount = 0;
       for (const doc of item.podDocuments) {
         if (doc.file_type?.startsWith('image/')) {
-          // Check image accessibility with a HEAD request
           try {
             const response = await fetch(doc.file_url, { method: 'HEAD' });
-            if (!response.ok) {
-              brokenCount++;
-            }
+            if (!response.ok) brokenCount++;
           } catch {
             brokenCount++;
           }
         }
-        // For non-image files (PDFs), we could also check but skip for now
       }
 
       updatedItems[i] = {
@@ -237,7 +225,6 @@ const EditableInvoiceNumber: React.FC<{
     setExpandedBuckets(prev => ({ ...prev, [bucket]: !prev[bucket] }));
   };
 
-  // Filter by search
   const filteredInvoices = arInvoices.filter(item => {
     if (!searchTerm) return true;
     const term = searchTerm.toLowerCase();
@@ -251,7 +238,6 @@ const EditableInvoiceNumber: React.FC<{
     );
   });
 
-  // Group by bucket
   const buckets: Record<string, ARInvoice[]> = {
     'current': [],
     '31-60': [],
@@ -262,14 +248,12 @@ const EditableInvoiceNumber: React.FC<{
     buckets[item.bucket].push(item);
   });
 
-  // Calculate totals
   const totalOutstanding = filteredInvoices.reduce((sum, item) => sum + item.balance, 0);
   const bucketTotals = Object.entries(buckets).reduce((acc, [key, items]) => {
     acc[key] = items.reduce((sum, item) => sum + item.balance, 0);
     return acc;
   }, {} as Record<string, number>);
 
-  // Count broken PODs across all invoices
   const totalBrokenPods = filteredInvoices.reduce((sum, item) => sum + item.brokenPodCount, 0);
   const invoicesWithBrokenPods = filteredInvoices.filter(item => item.brokenPodCount > 0).length;
 
@@ -315,7 +299,6 @@ const EditableInvoiceNumber: React.FC<{
     try {
       let deletedCount = 0;
 
-      // Delete all POD documents
       for (const doc of item.podDocuments) {
         try {
           const urlParts = doc.file_url.split('/pod-documents/');
@@ -329,16 +312,12 @@ const EditableInvoiceNumber: React.FC<{
         if (!error) deletedCount++;
       }
 
-      // NOTE: Invoice is intentionally kept intact - only POD files are removed for re-upload
-      // Load status stays as INVOICED so invoice remains accessible
-
       setReuploadResult({
         loadId: item.load.id,
         success: true,
         message: `${item.load.load_number}: ${deletedCount} POD(s) deleted. Invoice kept intact — driver can now re-upload POD.`,
       });
 
-      // Refresh data
       fetchARData();
     } catch (err: any) {
       setReuploadResult({
@@ -358,12 +337,10 @@ const EditableInvoiceNumber: React.FC<{
   };
 
   const handlePodReuploadFromPreview = () => {
-    // Refresh data after re-upload from preview modal
     handlePreviewClosed();
     fetchARData();
   };
 
-  // POD status badge renderer
   const renderPodBadge = (item: ARInvoice) => {
     const { podStatus, podDocuments, brokenPodCount } = item;
 
@@ -402,7 +379,6 @@ const EditableInvoiceNumber: React.FC<{
       );
     }
 
-    // Partially broken
     return (
       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
         <AlertTriangle className="w-3.5 h-3.5" />
@@ -413,7 +389,6 @@ const EditableInvoiceNumber: React.FC<{
 
   return (
     <div className="min-h-screen bg-slate-100">
-      {/* Header */}
       <div className="bg-gradient-to-r from-indigo-700 to-purple-800 text-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-4 mb-4">
@@ -433,7 +408,6 @@ const EditableInvoiceNumber: React.FC<{
             </button>
           </div>
 
-          {/* Summary Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mt-6">
             <div className="bg-white/10 backdrop-blur rounded-xl p-4 lg:col-span-1">
               <div className="flex items-center gap-2 text-indigo-200 text-sm mb-1">
@@ -464,7 +438,6 @@ const EditableInvoiceNumber: React.FC<{
         </div>
       </div>
 
-      {/* Broken POD Alert Banner */}
       {invoicesWithBrokenPods > 0 && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
           <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4 flex items-start gap-4">
@@ -477,8 +450,7 @@ const EditableInvoiceNumber: React.FC<{
               </h3>
               <p className="text-xs text-red-600 mt-1">
                 {invoicesWithBrokenPods} invoice{invoicesWithBrokenPods !== 1 ? 's have' : ' has'} POD documents with missing storage files.
-                These were uploaded before the storage fix was applied on Feb 9. Use the "Re-upload" button on each affected invoice
-                to delete the broken records and have the driver re-upload from the Driver Portal.
+                Use the "Delete Broken PODs" button on each affected invoice to delete the broken records and have the driver re-upload.
               </p>
             </div>
             <div className="flex-shrink-0">
@@ -491,7 +463,6 @@ const EditableInvoiceNumber: React.FC<{
         </div>
       )}
 
-      {/* Re-upload Result Banner */}
       {reuploadResult && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
           <div className={`rounded-xl p-4 flex items-center gap-3 ${reuploadResult.success ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200'}`}>
@@ -503,10 +474,7 @@ const EditableInvoiceNumber: React.FC<{
             <p className={`text-sm font-medium ${reuploadResult.success ? 'text-emerald-700' : 'text-red-700'}`}>
               {reuploadResult.message}
             </p>
-            <button
-              onClick={() => setReuploadResult(null)}
-              className="ml-auto text-slate-400 hover:text-slate-600"
-            >
+            <button onClick={() => setReuploadResult(null)} className="ml-auto text-slate-400 hover:text-slate-600">
               <span className="sr-only">Dismiss</span>
               &times;
             </button>
@@ -514,9 +482,7 @@ const EditableInvoiceNumber: React.FC<{
         </div>
       )}
 
-      {/* Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Search */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
@@ -550,7 +516,6 @@ const EditableInvoiceNumber: React.FC<{
 
               return (
                 <div key={bucket} className={`bg-white rounded-xl shadow-sm border ${colors.border} overflow-hidden`}>
-                  {/* Bucket Header */}
                   <button
                     onClick={() => toggleBucket(bucket)}
                     className={`w-full flex items-center justify-between px-6 py-4 ${colors.headerBg} hover:opacity-90 transition-opacity`}
@@ -562,9 +527,7 @@ const EditableInvoiceNumber: React.FC<{
                         <ChevronRight className={`w-5 h-5 ${colors.text}`} />
                       )}
                       <div className="text-left">
-                        <h3 className={`text-sm font-bold ${colors.text}`}>
-                          {bucketLabels[bucket]}
-                        </h3>
+                        <h3 className={`text-sm font-bold ${colors.text}`}>{bucketLabels[bucket]}</h3>
                         <p className="text-xs text-slate-500">{items.length} invoice{items.length !== 1 ? 's' : ''}</p>
                       </div>
                     </div>
@@ -575,7 +538,6 @@ const EditableInvoiceNumber: React.FC<{
                     </div>
                   </button>
 
-                  {/* Invoice Table */}
                   {isExpanded && (
                     <div className="overflow-x-auto">
                       <table className="w-full">
@@ -600,19 +562,20 @@ const EditableInvoiceNumber: React.FC<{
                                 className={`transition-colors ${hasBrokenPods ? 'bg-red-50/50 hover:bg-red-50' : 'hover:bg-slate-50'}`}
                               >
                                 <td className="px-4 py-3">
-  <EditableInvoiceNumber
-    invoice={item.invoice}
-    onSaved={(newNumber) => {
-      setArInvoices(prev =>
-        prev.map(i =>
-          i.invoice.id === item.invoice.id
-            ? { ...i, invoice: { ...i.invoice, invoice_number: newNumber } }
-            : i
-        )
-      );
-    }}
-  />
-</td>                                <td className="px-4 py-3">
+                                  <EditableInvoiceNumber
+                                    invoice={item.invoice}
+                                    onSaved={(newNumber) => {
+                                      setArInvoices(prev =>
+                                        prev.map(i =>
+                                          i.invoice.id === item.invoice.id
+                                            ? { ...i, invoice: { ...i.invoice, invoice_number: newNumber } }
+                                            : i
+                                        )
+                                      );
+                                    }}
+                                  />
+                                </td>
+                                <td className="px-4 py-3">
                                   <div className="text-sm">
                                     <p className="font-medium text-slate-800">{item.load?.load_number}</p>
                                     <p className="text-xs text-slate-500">
@@ -645,7 +608,6 @@ const EditableInvoiceNumber: React.FC<{
                                 </td>
                                 <td className="px-4 py-3 text-right">
                                   <div className="flex items-center justify-end gap-1.5">
-                                    {/* Preview Invoice */}
                                     <button
                                       onClick={() => handleOpenPreview(item)}
                                       className="inline-flex items-center gap-1 px-2.5 py-1.5 text-purple-700 bg-purple-50 border border-purple-200 rounded-lg text-xs font-medium hover:bg-purple-100 transition-colors"
@@ -654,7 +616,6 @@ const EditableInvoiceNumber: React.FC<{
                                       <Eye className="w-3.5 h-3.5" />
                                     </button>
 
-                                    {/* View Attachments */}
                                     {item.podDocuments.length > 0 && (
                                       <button
                                         onClick={() => {
@@ -669,7 +630,6 @@ const EditableInvoiceNumber: React.FC<{
                                       </button>
                                     )}
 
-                                    {/* Re-upload POD (only shown for broken PODs) */}
                                     {hasBrokenPods && (
                                       <button
                                         onClick={() => handleReuploadPod(item)}
@@ -686,7 +646,6 @@ const EditableInvoiceNumber: React.FC<{
                                       </button>
                                     )}
 
-                                    {/* Record Payment */}
                                     <button
                                       onClick={() => onRecordPayment(item.load)}
                                       className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700 transition-colors"
@@ -710,7 +669,6 @@ const EditableInvoiceNumber: React.FC<{
         )}
       </div>
 
-      {/* Invoice Preview Modal */}
       <InvoicePreviewModal
         isOpen={showPreview}
         load={previewLoad}
@@ -719,7 +677,6 @@ const EditableInvoiceNumber: React.FC<{
         onPodReuploadRequested={handlePodReuploadFromPreview}
       />
 
-      {/* Attachments Modal */}
       {showAttachmentsModal && selectedAttachmentItem && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
