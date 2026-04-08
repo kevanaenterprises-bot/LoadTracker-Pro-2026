@@ -1895,40 +1895,35 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
             {(accepted || load.status === 'IN_TRANSIT') && (
               <div className="bg-white rounded-2xl shadow-lg p-6">
                 <h2 className="text-lg font-bold text-slate-800 mb-4">Upload POD Documents</h2>
-                {!load.bol_number && (
-                  <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                    <div className="flex items-center gap-2 mb-3">
-                      <ClipboardList className="w-5 h-5 text-amber-600" />
-                      <h3 className="font-semibold text-amber-800">Enter BOL Number</h3>
-                    </div>
-                    <p className="text-amber-700 text-sm mb-3">Enter the Bill of Lading (BOL) number before uploading POD.</p>
-                    <input
-                      type="text"
-                      value={bolNumber}
-                      onChange={(e) => setBolNumber(e.target.value.toUpperCase())}
-                      placeholder="Enter BOL Number"
-                      className="w-full px-4 py-3 border border-amber-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent text-lg font-mono bg-white"
-                    />
-                    {!bolNumber.trim() && (
-                      <p className="mt-2 text-amber-600 text-sm flex items-center gap-1">
-                        <AlertCircle className="w-4 h-4" />
-                        BOL number is required to upload POD
-                      </p>
-                    )}
-                  </div>
-                )}
-                {uploadedFiles.length > 0 && (
-                  <div className="mb-6 space-y-2">
-                    {uploadedFiles.map((file, i) => (
-                      <div key={i} className="flex items-center gap-3 p-3 bg-emerald-50 rounded-lg border border-emerald-200">
-                        <FileText className="w-5 h-5 text-emerald-600" />
-                        <span className="text-sm font-medium text-emerald-700">{file}</span>
-                        <CheckCircle className="w-4 h-4 text-emerald-600 ml-auto" />
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <label className="block">
+                <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+  <div className="flex items-center gap-2 mb-3">
+    <ClipboardList className="w-5 h-5 text-amber-600" />
+    <h3 className="font-semibold text-amber-800">BOL Number <span className="text-red-500">*</span></h3>
+  </div>
+  <p className="text-amber-700 text-sm mb-3">Enter the Bill of Lading (BOL) number. This is required before uploading POD documents.</p>
+  <input
+    type="text"
+    value={bolNumber}
+    onChange={(e) => setBolNumber(e.target.value.toUpperCase())}
+    placeholder="Enter BOL Number"
+    className={`w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:border-transparent text-lg font-mono bg-white ${
+      !bolNumber.trim()
+        ? 'border-red-300 focus:ring-red-500'
+        : 'border-emerald-300 focus:ring-emerald-500'
+    }`}
+  />
+  {!bolNumber.trim() ? (
+    <p className="mt-2 text-red-600 text-sm flex items-center gap-1 font-medium">
+      <AlertCircle className="w-4 h-4" />
+      BOL number is required to upload POD
+    </p>
+  ) : (
+    <p className="mt-2 text-emerald-600 text-sm flex items-center gap-1">
+      <CheckCircle className="w-4 h-4" />
+      BOL number entered — you can now upload POD
+    </p>
+  )}
+</div>                <label className="block">
                   <input type="file" multiple accept="image/*,.pdf" onChange={handleFileUpload} disabled={uploading || (!load.bol_number && !bolNumber.trim())} className="hidden" />
                   <div className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
                     uploading ? 'border-slate-200 bg-slate-50 cursor-wait'
