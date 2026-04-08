@@ -790,4 +790,4 @@ const EditableInvoiceNumber: React.FC<{
   );
 };
 
-
+export default AccountsReceivableView;
