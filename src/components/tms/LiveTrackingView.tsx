@@ -65,8 +65,8 @@ interface TrailPoint {
   recorded_at: string;
 }
 
-// Google Maps API key
-const GOOGLE_MAPS_API_KEY = 'AIzaSyA3jW9DK59BQEt5izDeJvvNXf2RR0x_rRA';
+// Google Maps API key from Vercel env variable
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 
 // Declare Google Maps types
 declare global {
