@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Printer, Loader2, AlertTriangle, RotateCcw, Trash2, ImageOff, FileDown, FileImage, Mail, Send, Eye, ArrowLeft, Paperclip, Plus, UserPlus } from 'lucide-react';
+import { X, Printer, Loader2, AlertTriangle, RotateCcw, Trash2, ImageOff, FileDown, FileImage, Mail, Send, Eye, ArrowLeft, Paperclip, Plus, UserPlus, Pencil, Check } from 'lucide-react';
 
 
 import { supabase } from '@/lib/supabase';
@@ -64,6 +64,12 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
   // Print state
   const [printPreparing, setPrintPreparing] = useState(false);
 
+  // Editable invoice number
+  const [editingInvoiceNumber, setEditingInvoiceNumber] = useState(false);
+  const [tempInvoiceNumber, setTempInvoiceNumber] = useState('');
+  const [savingInvoiceNumber, setSavingInvoiceNumber] = useState(false);
+  const [currentInvoiceNumber, setCurrentInvoiceNumber] = useState('');
+
   // Derive primary email: prefer pod_email, fall back to general email
   const primaryEmail = (customer?.pod_email || customer?.email || '').trim();
   const isPodEmail = !!(customer?.pod_email && customer.pod_email.trim());
@@ -81,10 +87,35 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
       setAdditionalEmails([]);
       setNewEmailInput('');
       setEmailInputError('');
+      setCurrentInvoiceNumber(invoice?.invoice_number || '');
+      setEditingInvoiceNumber(false);
       fetchData();
     }
   }, [isOpen, load, invoice]);
 
+
+  // ═══ INVOICE NUMBER EDIT ═══
+  const handleSaveInvoiceNumber = async () => {
+    if (!invoice || !tempInvoiceNumber.trim()) return;
+    setSavingInvoiceNumber(true);
+    try {
+      const { error } = await supabase
+        .from('invoices')
+        .update({ invoice_number: tempInvoiceNumber.trim() })
+        .eq('id', invoice.id);
+      if (error) {
+        alert('Failed to update invoice number: ' + error.message);
+      } else {
+        setCurrentInvoiceNumber(tempInvoiceNumber.trim());
+        setEditingInvoiceNumber(false);
+      }
+    } catch (err) {
+      console.error('Error updating invoice number:', err);
+      alert('An unexpected error occurred.');
+    } finally {
+      setSavingInvoiceNumber(false);
+    }
+  };
 
   // ═══ ADDITIONAL EMAIL HELPERS ═══
   const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
@@ -973,6 +1004,56 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
 
         </div>
 
+        {/* Editable Invoice Number Bar */}
+        {viewMode === 'invoice' && (
+          <div className="px-6 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-3">
+            <span className="text-sm font-semibold text-slate-600">Invoice #:</span>
+            {editingInvoiceNumber ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={tempInvoiceNumber}
+                  onChange={(e) => setTempInvoiceNumber(e.target.value)}
+                  className="px-3 py-1.5 text-sm font-bold text-blue-700 border-2 border-blue-400 rounded-lg focus:outline-none focus:border-blue-600 w-40"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveInvoiceNumber();
+                    if (e.key === 'Escape') setEditingInvoiceNumber(false);
+                  }}
+                />
+                <button
+                  onClick={handleSaveInvoiceNumber}
+                  disabled={savingInvoiceNumber || !tempInvoiceNumber.trim()}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
+                >
+                  {savingInvoiceNumber ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  Save
+                </button>
+                <button
+                  onClick={() => setEditingInvoiceNumber(false)}
+                  className="px-3 py-1.5 text-slate-500 hover:text-slate-700 text-xs font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-blue-700">{currentInvoiceNumber || invoice?.invoice_number}</span>
+                <button
+                  onClick={() => {
+                    setTempInvoiceNumber(currentInvoiceNumber || invoice?.invoice_number || '');
+                    setEditingInvoiceNumber(true);
+                  }}
+                  className="p-1 hover:bg-slate-200 rounded transition-colors"
+                  title="Edit invoice number"
+                >
+                  <Pencil className="w-3.5 h-3.5 text-slate-400 hover:text-blue-600" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Email Result Banner */}
         {emailResult && (
           <div className={`px-6 py-3 border-b flex items-center justify-between ${emailResult.success ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
@@ -1090,7 +1171,7 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                   <div className="meta-row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', paddingBottom: '14px', borderBottom: '2px solid #e2e8f0' }}>
                     <div className="meta-left">
                       <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#1e40af', marginBottom: '3px' }}>
-                        Invoice {invoice.invoice_number}
+                        Invoice {currentInvoiceNumber || invoice.invoice_number}
                       </h2>
                       <p style={{ fontSize: '12px', color: '#64748b' }}>Date: {invoiceDate}</p>
                     </div>
