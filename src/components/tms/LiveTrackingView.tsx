@@ -65,10 +65,14 @@ interface TrailPoint {
   recorded_at: string;
 }
 
-// Declare HERE Maps types
+// Google Maps API key
+const GOOGLE_MAPS_API_KEY = 'AIzaSyA3jW9DK59BQEt5izDeJvvNXf2RR0x_rRA';
+
+// Declare Google Maps types
 declare global {
   interface Window {
-    H: any;
+    google: any;
+    initGoogleMaps: () => void;
   }
 }
 
@@ -76,19 +80,15 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
 
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
-  const platformRef = useRef<any>(null);
-  const uiRef = useRef<any>(null);
-  const markersGroupRef = useRef<any>(null);
-  const geofencesGroupRef = useRef<any>(null);
-  const trailGroupRef = useRef<any>(null);
-  const routeGroupRef = useRef<any>(null);
-  const customLayersRef = useRef<Record<string, any>>({});
-  const defaultLayersRef = useRef<any>(null);
+  const markersRef = useRef<any[]>([]);
+  const geofenceCirclesRef = useRef<any[]>([]);
+  const trailPolylinesRef = useRef<any[]>([]);
+  const routePolylinesRef = useRef<any[]>([]);
+  const geocoderRef = useRef<any>(null);
 
   const [drivers, setDrivers] = useState<DriverLocation[]>([]);
   const [loading, setLoading] = useState(true);
   const [mapLoaded, setMapLoaded] = useState(false);
-  const [mapApiKey, setMapApiKey] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [selectedDriver, setSelectedDriver] = useState<DriverLocation | null>(null);
   const [showGeofences, setShowGeofences] = useState(true);
@@ -108,194 +108,98 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
 
   const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Load HERE Maps API key with retry logic
+  // Load Google Maps JS API
   useEffect(() => {
-    let cancelled = false;
-    const fetchMapConfig = async (attempt = 1) => {
-      const MAX_RETRIES = 2;
-      try {
-        console.log(`[LiveTracking] Fetching map config (attempt ${attempt}/${MAX_RETRIES})...`);
-        const { data, error } = await supabase.functions.invoke('here-webhook', {
-          body: { action: 'get-map-config' },
-        });
-        if (cancelled) return;
-        if (data?.apiKey) {
-          console.log('[LiveTracking] API key fetched successfully');
-          setMapApiKey(data.apiKey);
-        } else {
-          // Use console.warn instead of console.error to avoid triggering error tracking
-          // This is a non-critical failure - maps just won't load
-          console.warn('[LiveTracking] Map config unavailable (edge function may not be deployed):', error?.message || 'No API key returned');
-          if (attempt < MAX_RETRIES && !cancelled) {
-            const delay = Math.min(2000 * attempt, 6000);
-            console.log(`[LiveTracking] Retrying in ${delay}ms...`);
-            setTimeout(() => { if (!cancelled) fetchMapConfig(attempt + 1); }, delay);
-          } else {
-            console.log('[LiveTracking] Map features will be unavailable - edge function not reachable');
-          }
-        }
-      } catch (err: any) {
-        // Use console.warn for edge function connectivity issues (non-critical)
-        console.warn(`[LiveTracking] Map config fetch failed (attempt ${attempt}/${MAX_RETRIES}):`, err?.message || 'Edge function unreachable');
-        if (attempt < MAX_RETRIES && !cancelled) {
-          const delay = Math.min(2000 * attempt, 6000);
-          console.log(`[LiveTracking] Retrying in ${delay}ms...`);
-          setTimeout(() => { if (!cancelled) fetchMapConfig(attempt + 1); }, delay);
-        } else {
-          console.log('[LiveTracking] Map features will be unavailable - edge function not reachable');
-        }
-      }
-    };
-    fetchMapConfig();
-    return () => { cancelled = true; };
-  }, []);
-
-
-
-  // Load HERE Maps JS scripts
-  useEffect(() => {
-    if (!mapApiKey) return;
-
-    const scripts = [
-      'https://js.api.here.com/v3/3.1/mapsjs-core.js',
-      'https://js.api.here.com/v3/3.1/mapsjs-service.js',
-      'https://js.api.here.com/v3/3.1/mapsjs-ui.js',
-      'https://js.api.here.com/v3/3.1/mapsjs-mapevents.js',
-    ];
-
-    if (!document.querySelector('link[href*="mapsjs-ui.css"]')) {
-      const css = document.createElement('link');
-      css.rel = 'stylesheet';
-      css.href = 'https://js.api.here.com/v3/3.1/mapsjs-ui.css';
-      document.head.appendChild(css);
-    }
-
-    if (window.H?.service?.Platform) {
-      console.log('[LiveTracking] HERE SDK already loaded');
+    if (window.google?.maps) {
+      console.log('[LiveTracking] Google Maps already loaded');
       setMapLoaded(true);
       return;
     }
 
+    // Check if script is already being loaded
+    if (document.querySelector('script[src*="maps.googleapis.com"]')) {
+      // Wait for it to finish loading
+      const checkReady = () => {
+        if (window.google?.maps) {
+          setMapLoaded(true);
+        } else {
+          setTimeout(checkReady, 100);
+        }
+      };
+      checkReady();
+      return;
+    }
+
     let cancelled = false;
-    let loadedCount = 0;
 
-    const loadNext = () => {
-      if (cancelled) return;
-      if (loadedCount >= scripts.length) {
-        let attempts = 0;
-        const checkReady = () => {
-          if (cancelled) return;
-          if (window.H?.service?.Platform) {
-            console.log('[LiveTracking] HERE SDK ready after polling');
-            setMapLoaded(true);
-          } else if (attempts < 50) {
-            attempts++;
-            setTimeout(checkReady, 100);
-          } else {
-            console.warn('[LiveTracking] HERE Maps SDK failed to initialize (non-critical)');
-          }
-        };
-        setTimeout(checkReady, 100);
-        return;
+    window.initGoogleMaps = () => {
+      if (!cancelled) {
+        console.log('[LiveTracking] Google Maps SDK ready');
+        setMapLoaded(true);
       }
-
-      const src = scripts[loadedCount];
-      const existing = document.querySelector(`script[src="${src}"]`);
-      if (existing) {
-        loadedCount++;
-        loadNext();
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.src = src;
-      script.onload = () => { loadedCount++; loadNext(); };
-      script.onerror = () => { loadedCount++; loadNext(); };
-      document.head.appendChild(script);
     };
 
-    loadNext();
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&callback=initGoogleMaps&libraries=geometry`;
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => {
+      console.error('[LiveTracking] Failed to load Google Maps SDK');
+    };
+    document.head.appendChild(script);
+
     return () => { cancelled = true; };
-  }, [mapApiKey]);
-
-  // Suppress Tangram rendering errors from HERE Maps SDK (non-fatal tile rendering glitches)
-  useEffect(() => {
-    const originalConsoleError = console.error;
-    const suppressedPatterns = ['Tangram [error]', "evaluating 'e.retain'", 'Error for style group'];
-    
-    console.error = (...args: any[]) => {
-      const message = args.map(a => String(a)).join(' ');
-      if (suppressedPatterns.some(pattern => message.includes(pattern))) {
-        // Suppress Tangram rendering errors - these are non-fatal HERE Maps SDK internal errors
-        return;
-      }
-      originalConsoleError.apply(console, args);
-    };
-    
-    return () => {
-      console.error = originalConsoleError;
-    };
   }, []);
 
   // Initialize map
   useEffect(() => {
-    if (!mapLoaded || !mapRef.current || !mapApiKey || mapInstanceRef.current) return;
+    if (!mapLoaded || !mapRef.current || mapInstanceRef.current) return;
 
     try {
-      const H = window.H;
-      if (!H?.service?.Platform) return;
+      const google = window.google;
+      if (!google?.maps) return;
 
-      const platform = new H.service.Platform({ apikey: mapApiKey });
-      platformRef.current = platform;
-
-      const defaultLayers = platform.createDefaultLayers();
-      defaultLayersRef.current = defaultLayers;
-      const map = new H.Map(mapRef.current, defaultLayers.vector.normal.map, {
+      const map = new google.maps.Map(mapRef.current, {
         zoom: 5,
         center: { lat: 32.0, lng: -96.0 },
-        pixelRatio: window.devicePixelRatio || 1,
+        mapTypeId: 'roadmap',
+        disableDefaultUI: true,
+        zoomControl: true,
+        zoomControlOptions: {
+          position: google.maps.ControlPosition.RIGHT_BOTTOM,
+        },
+        fullscreenControl: false,
+        streetViewControl: false,
+        mapTypeControl: false,
+        styles: [
+          { elementType: 'geometry', stylers: [{ color: '#1e293b' }] },
+          { elementType: 'labels.text.stroke', stylers: [{ color: '#1e293b' }] },
+          { elementType: 'labels.text.fill', stylers: [{ color: '#94a3b8' }] },
+          { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#334155' }] },
+          { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#1e293b' }] },
+          { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0f172a' }] },
+          { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+          { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+        ],
       });
 
-      const behavior = new H.mapevents.Behavior(new H.mapevents.MapEvents(map));
-      const ui = H.ui.UI.createDefault(map, defaultLayers);
-      uiRef.current = ui;
-
-      const markersGroup = new H.map.Group();
-      const geofencesGroup = new H.map.Group();
-      const trailGroup = new H.map.Group();
-      const routeGroup = new H.map.Group();
-
-      map.addObject(geofencesGroup);
-      map.addObject(routeGroup);
-      map.addObject(trailGroup);
-      map.addObject(markersGroup);
-
-      markersGroupRef.current = markersGroup;
-      geofencesGroupRef.current = geofencesGroup;
-      trailGroupRef.current = trailGroup;
-      routeGroupRef.current = routeGroup;
+      geocoderRef.current = new google.maps.Geocoder();
       mapInstanceRef.current = map;
-
-      const handleResize = () => map.getViewPort().resize();
-      window.addEventListener('resize', handleResize);
-      return () => { window.removeEventListener('resize', handleResize); };
+      console.log('[LiveTracking] Google Maps initialized');
     } catch (err) {
       console.error('[LiveTracking] Failed to initialize map:', err);
     }
-  }, [mapLoaded, mapApiKey]);
+  }, [mapLoaded]);
 
-
-  // Fetch driver locations - direct DB PRIMARY, edge function as bonus
+  // Fetch driver locations - direct DB PRIMARY
   const fetchDriverLocations = useCallback(async () => {
     console.log('[LiveTracking] Fetching drivers... showAllDrivers=' + showAllDrivers);
     try {
-      // PRIMARY: Direct DB query (edge function has URL parsing issues)
       let query = supabase
         .from('drivers')
         .select('id, name, phone, truck_number, status, current_location, last_known_lat, last_known_lng, last_position_update, last_known_speed, last_known_heading, battery_level')
         .order('name');
 
-      // Only filter if NOT showing all drivers
       if (!showAllDrivers) {
         query = query.in('status', ['available', 'on_route']);
       }
@@ -305,32 +209,15 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
       if (driversError) {
         console.error('[LiveTracking] Direct DB query failed:', driversError);
         setFetchMethod('DB query failed: ' + driversError.message);
-        // Try edge function as fallback
-        try {
-          const { data } = await supabase.functions.invoke('here-webhook', {
-            body: { action: 'get-all-driver-locations', include_inactive: showAllDrivers },
-          });
-          if (data?.success && data.drivers) {
-            console.log(`[LiveTracking] Edge function returned ${data.drivers.length} drivers`);
-            setDrivers(data.drivers);
-            setFetchMethod('Edge function');
-            setLastRefresh(new Date());
-            return;
-          }
-        } catch (e) {
-          console.error('[LiveTracking] Edge function also failed:', e);
-        }
         return;
       }
 
       console.log(`[LiveTracking] Direct DB returned ${(driversData || []).length} drivers`);
-      
-      // Log each driver's status for debugging
+
       (driversData || []).forEach(d => {
         console.log(`[LiveTracking] Driver: ${d.name} | Status: ${d.status} | Truck: ${d.truck_number} | Has GPS: ${!!(d.last_known_lat && d.last_known_lng)} | Last update: ${d.last_position_update || 'never'}`);
       });
 
-      // Get active loads for these drivers
       const driverIds = (driversData || []).map(d => d.id);
       let activeLoads: any[] = [];
       if (driverIds.length > 0) {
@@ -343,7 +230,6 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
         console.log(`[LiveTracking] Found ${activeLoads.length} active loads`);
       }
 
-      // Map to the expected format
       const driverLocations = (driversData || []).map(driver => {
         const activeLoad = activeLoads.find(l => l.driver_id === driver.id);
         const posAge = driver.last_position_update
@@ -372,8 +258,6 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
     }
   }, [showAllDrivers]);
 
-
-
   useEffect(() => {
     fetchDriverLocations();
   }, [fetchDriverLocations]);
@@ -383,7 +267,7 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
     if (autoRefresh) {
       refreshIntervalRef.current = setInterval(() => {
         fetchDriverLocations();
-      }, 30000); // 30 seconds
+      }, 30000);
     }
     return () => {
       if (refreshIntervalRef.current) {
@@ -392,11 +276,16 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
     };
   }, [autoRefresh, fetchDriverLocations]);
 
-  // Create driver marker SVG
-  const createDriverMarkerIcon = (driver: DriverLocation, isSelected: boolean) => {
-    const H = window.H;
-    if (!H) return null;
+  // Helper: clear all overlays of a given ref array
+  const clearOverlays = (overlaysRef: React.MutableRefObject<any[]>) => {
+    overlaysRef.current.forEach(overlay => {
+      if (overlay.setMap) overlay.setMap(null);
+    });
+    overlaysRef.current = [];
+  };
 
+  // Create driver marker SVG as data URL
+  const createDriverMarkerSvg = (driver: DriverLocation, isSelected: boolean): string => {
     const isOnline = driver.position_age_minutes !== null && driver.position_age_minutes < 10;
     const isStale = driver.position_age_minutes !== null && driver.position_age_minutes >= 10 && driver.position_age_minutes < 60;
     const statusColor = driver.status === 'on_route' ? '#3b82f6' : driver.status === 'available' ? '#10b981' : '#94a3b8';
@@ -407,21 +296,17 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
     const svgMarkup = `
       <svg xmlns="http://www.w3.org/2000/svg" width="${size + 20}" height="${size + 30}" viewBox="0 0 ${size + 20} ${size + 30}">
         <defs>
-          <filter id="shadow_${driver.id.substring(0,8)}" x="-20%" y="-20%" width="140%" height="140%">
+          <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
             <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="rgba(0,0,0,0.3)"/>
           </filter>
         </defs>
-        <!-- Pin shape -->
-        <path d="M${(size+20)/2} ${size+25} L${(size+20)/2 - 8} ${size} L${(size+20)/2 + 8} ${size}" fill="${borderColor}" />
-        <!-- Circle background -->
-        <circle cx="${(size+20)/2}" cy="${size/2 + 5}" r="${size/2}" fill="${borderColor}" filter="url(#shadow_${driver.id.substring(0,8)})"/>
+        <path d="${(size+20)/2} ${size+25} L${(size+20)/2 - 8} ${size} L${(size+20)/2 + 8} ${size}" fill="${borderColor}" />
+        <circle cx="${(size+20)/2}" cy="${size/2 + 5}" r="${size/2}" fill="${borderColor}" filter="url(#shadow)"/>
         <circle cx="${(size+20)/2}" cy="${size/2 + 5}" r="${size/2 - 3}" fill="white"/>
-        <!-- Truck icon -->
         <g transform="translate(${(size+20)/2 - 10}, ${size/2 + 5 - 10}) rotate(${heading}, 10, 10)">
           <path d="M4 16V6a2 2 0 0 1 2-2h8l4 4v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" fill="none" stroke="${borderColor}" stroke-width="1.5"/>
           <path d="M12 6v4h4" fill="none" stroke="${borderColor}" stroke-width="1.5"/>
         </g>
-        <!-- Status dot -->
         <circle cx="${(size+20)/2 + size/2 - 4}" cy="8" r="5" fill="${isOnline ? '#10b981' : isStale ? '#f59e0b' : '#ef4444'}" stroke="white" stroke-width="2"/>
         ${driver.battery_level !== null && driver.battery_level < 20 ? `
           <circle cx="${(size+20)/2 - size/2 + 4}" cy="8" r="5" fill="#ef4444" stroke="white" stroke-width="2"/>
@@ -429,14 +314,11 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
       </svg>
     `;
 
-    return new H.map.Icon(svgMarkup, { anchor: { x: (size+20)/2, y: size+25 } });
+    return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svgMarkup);
   };
 
-  // Create stop marker SVG
-  const createStopMarkerIcon = (stopType: string, companyName: string) => {
-    const H = window.H;
-    if (!H) return null;
-
+  // Create stop marker SVG as data URL
+  const createStopMarkerSvg = (stopType: string): string => {
     const color = stopType === 'pickup' ? '#8b5cf6' : '#ef4444';
     const letter = stopType === 'pickup' ? 'P' : 'D';
 
@@ -447,60 +329,67 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
       </svg>
     `;
 
-    return new H.map.Icon(svgMarkup, { anchor: { x: 16, y: 42 } });
+    return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svgMarkup);
   };
 
   // Update map markers
   useEffect(() => {
-    if (!mapInstanceRef.current || !markersGroupRef.current || !window.H) return;
+    if (!mapInstanceRef.current || !window.google?.maps) return;
 
-    const H = window.H;
-    const markersGroup = markersGroupRef.current;
-    const geofencesGroup = geofencesGroupRef.current;
-    const routeGroup = routeGroupRef.current;
+    const google = window.google;
 
-    // Clear existing markers
-    markersGroup.removeAll();
-    geofencesGroup.removeAll();
-    routeGroup.removeAll();
+    // Clear existing overlays
+    clearOverlays(markersRef);
+    clearOverlays(geofenceCirclesRef);
+    clearOverlays(routePolylinesRef);
 
     const driversWithPosition = drivers.filter(d => d.has_position);
+    const bounds = new google.maps.LatLngBounds();
+    let hasBounds = false;
 
     driversWithPosition.forEach((driver) => {
       if (!driver.last_known_lat || !driver.last_known_lng) return;
 
       const isSelected = selectedDriver?.id === driver.id;
-      const icon = createDriverMarkerIcon(driver, isSelected);
-      if (!icon) return;
+      const position = { lat: driver.last_known_lat, lng: driver.last_known_lng };
+      const size = isSelected ? 48 : 40;
 
-      const marker = new H.map.Marker(
-        { lat: driver.last_known_lat, lng: driver.last_known_lng },
-        { icon, data: driver }
-      );
+      const marker = new google.maps.Marker({
+        position,
+        map: mapInstanceRef.current,
+        icon: {
+          url: createDriverMarkerSvg(driver, isSelected),
+          scaledSize: new google.maps.Size(size + 20, size + 30),
+          anchor: new google.maps.Point((size + 20) / 2, size + 25),
+        },
+        title: `${driver.name} - ${driver.truck_number}`,
+        zIndex: isSelected ? 1000 : 100,
+      });
 
-      marker.addEventListener('tap', () => {
+      marker.addListener('click', () => {
         setSelectedDriver(driver);
       });
 
-      markersGroup.addObject(marker);
+      markersRef.current.push(marker);
+      bounds.extend(position);
+      hasBounds = true;
 
       // Add geofences
       if (showGeofences && driver.geofences) {
         driver.geofences.forEach((gf) => {
           if (gf.center_lat && gf.center_lng) {
-            const circle = new H.map.Circle(
-              { lat: gf.center_lat, lng: gf.center_lng },
-              gf.radius_meters || 500,
-              {
-                style: {
-                  strokeColor: 'rgba(59, 130, 246, 0.6)',
-                  lineWidth: 2,
-                  fillColor: 'rgba(59, 130, 246, 0.1)',
-                  lineDash: [4, 4],
-                },
-              }
-            );
-            geofencesGroup.addObject(circle);
+            const circle = new google.maps.Circle({
+              center: { lat: gf.center_lat, lng: gf.center_lng },
+              radius: gf.radius_meters || 500,
+              map: mapInstanceRef.current,
+              strokeColor: 'rgba(59, 130, 246, 0.6)',
+              strokeWeight: 2,
+              fillColor: 'rgba(59, 130, 246, 0.1)',
+              strokeOpacity: 0.6,
+              fillOpacity: 0.1,
+              clickable: false,
+            });
+            geofenceCirclesRef.current.push(circle);
           }
         });
       }
@@ -510,28 +399,29 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
         driver.stops.forEach((stop) => {
           const gf = driver.geofences.find(g => g.stop_id === stop.id);
           if (gf && gf.center_lat && gf.center_lng) {
-            const stopIcon = createStopMarkerIcon(stop.stop_type, stop.company_name);
-            if (stopIcon) {
-              const stopMarker = new H.map.Marker(
-                { lat: gf.center_lat, lng: gf.center_lng },
-                { icon: stopIcon }
-              );
-              markersGroup.addObject(stopMarker);
-            }
+            const stopMarker = new google.maps.Marker({
+              position: { lat: gf.center_lat, lng: gf.center_lng },
+              map: mapInstanceRef.current,
+              icon: {
+                url: createStopMarkerSvg(stop.stop_type),
+                scaledSize: new google.maps.Size(32, 42),
+                anchor: new google.maps.Point(16, 42),
+              },
+              zIndex: 50,
+            });
+            markersRef.current.push(stopMarker);
           }
         });
 
-        // Draw route line from driver to next stop
+        // Draw route line from driver to stops
         if (driver.geofences.length > 0) {
-          const routePoints: Array<{lat: number; lng: number}> = [];
-          
-          // Add driver position
+          const routePoints: Array<{ lat: number; lng: number }> = [];
+
           routePoints.push({ lat: driver.last_known_lat, lng: driver.last_known_lng });
-          
-          // Add stops in order
+
           const pickups = driver.stops.filter(s => s.stop_type === 'pickup').sort((a, b) => a.stop_sequence - b.stop_sequence);
           const deliveries = driver.stops.filter(s => s.stop_type === 'delivery').sort((a, b) => a.stop_sequence - b.stop_sequence);
-          
+
           [...pickups, ...deliveries].forEach(stop => {
             const gf = driver.geofences.find(g => g.stop_id === stop.id);
             if (gf && gf.center_lat && gf.center_lng) {
@@ -540,48 +430,58 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
           });
 
           if (routePoints.length >= 2) {
-            const lineString = new H.geo.LineString();
-            routePoints.forEach(p => lineString.pushPoint(p));
-            
-            const routeLine = new H.map.Polyline(lineString, {
-              style: {
-                strokeColor: 'rgba(59, 130, 246, 0.5)',
-                lineWidth: 3,
-                lineDash: [8, 6],
-              },
+            const routeLine = new google.maps.Polyline({
+              path: routePoints,
+              map: mapInstanceRef.current,
+              strokeColor: '#3b82f6',
+              strokeOpacity: 0.5,
+              strokeWeight: 3,
+              geodesic: true,
+              icons: [{
+                icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 },
+                offset: '0',
+                repeat: '20px',
+              }],
             });
-            routeGroup.addObject(routeLine);
+            routePolylinesRef.current.push(routeLine);
           }
         }
       }
     });
 
     // Auto-fit map to show all markers
-    if (driversWithPosition.length > 0 && !selectedDriver) {
-      try {
-        const bounds = markersGroup.getBoundingBox();
-        if (bounds) {
-          mapInstanceRef.current.getViewModel().setLookAtData({
-            bounds,
-            padding: { top: 80, bottom: 80, left: sidebarOpen ? 420 : 80, right: 80 },
-          });
-        }
-      } catch (e) {
-        // Ignore bounds errors
-      }
+    if (hasBounds && !selectedDriver) {
+      mapInstanceRef.current.fitBounds(bounds, {
+        top: 80,
+        bottom: 80,
+        left: sidebarOpen ? 420 : 80,
+        right: 80,
+      });
     }
   }, [drivers, selectedDriver, showGeofences, sidebarOpen]);
 
-  // Fetch and display driver trail
+  // Fetch and display driver trail (direct from DB instead of edge function)
   const fetchDriverTrail = async (driverId: string) => {
     try {
-      const { data } = await supabase.functions.invoke('here-webhook', {
-        body: { action: 'get-driver-trail', driver_id: driverId, hours: trailHours },
-      });
+      const hoursAgo = new Date(Date.now() - trailHours * 60 * 60 * 1000).toISOString();
+      const { data, error } = await supabase
+        .from('driver_marker_history')
+        .select('latitude, longitude, speed, heading, recorded_at')
+        .eq('driver_id', driverId)
+        .gte('recorded_at', hoursAgo)
+        .order('recorded_at', { ascending: true });
 
-      if (data?.success && data.trail) {
-        setDriverTrail(data.trail);
-        drawTrail(data.trail);
+      if (error) {
+        console.error('Failed to fetch trail:', error);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        setDriverTrail(data);
+        drawTrail(data);
+      } else {
+        setDriverTrail([]);
+        clearOverlays(trailPolylinesRef);
       }
     } catch (err) {
       console.error('Failed to fetch trail:', err);
@@ -589,51 +489,63 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
   };
 
   const drawTrail = (trail: TrailPoint[]) => {
-    if (!trailGroupRef.current || !window.H || trail.length < 2) return;
+    if (!mapInstanceRef.current || !window.google?.maps || trail.length < 2) return;
 
-    const H = window.H;
-    trailGroupRef.current.removeAll();
+    const google = window.google;
+    clearOverlays(trailPolylinesRef);
 
-    const lineString = new H.geo.LineString();
-    trail.forEach(point => {
-      lineString.pushPoint({ lat: point.latitude, lng: point.longitude });
+    const path = trail.map(point => ({ lat: point.latitude, lng: point.longitude }));
+
+    const trailLine = new google.maps.Polyline({
+      path,
+      map: mapInstanceRef.current,
+      strokeColor: '#8b5cf6',
+      strokeOpacity: 0.7,
+      strokeWeight: 4,
+      geodesic: true,
     });
+    trailPolylinesRef.current.push(trailLine);
 
-    const trailLine = new H.map.Polyline(lineString, {
-      style: {
-        strokeColor: 'rgba(139, 92, 246, 0.7)',
-        lineWidth: 4,
-        lineCap: 'round',
-        lineJoin: 'round',
-      },
-    });
-
-    trailGroupRef.current.addObject(trailLine);
-
-    // Add start and end markers
+    // Add start marker (purple dot)
     if (trail.length > 0) {
-      const startSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="6" fill="#8b5cf6" stroke="white" stroke-width="2"/></svg>`;
-      const endSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="6" fill="#10b981" stroke="white" stroke-width="2"/></svg>`;
+      const startMarker = new google.maps.Marker({
+        position: { lat: trail[0].latitude, lng: trail[0].longitude },
+        map: mapInstanceRef.current,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 6,
+          fillColor: '#8b5cf6',
+          fillOpacity: 1,
+          strokeColor: 'white',
+          strokeWeight: 2,
+        },
+        zIndex: 200,
+      });
+      trailPolylinesRef.current.push(startMarker);
 
-      const startMarker = new H.map.Marker(
-        { lat: trail[0].latitude, lng: trail[0].longitude },
-        { icon: new H.map.Icon(startSvg, { anchor: { x: 8, y: 8 } }) }
-      );
-      const endMarker = new H.map.Marker(
-        { lat: trail[trail.length - 1].latitude, lng: trail[trail.length - 1].longitude },
-        { icon: new H.map.Icon(endSvg, { anchor: { x: 8, y: 8 } }) }
-      );
-
-      trailGroupRef.current.addObject(startMarker);
-      trailGroupRef.current.addObject(endMarker);
+      // End marker (green dot)
+      const endMarker = new google.maps.Marker({
+        position: { lat: trail[trail.length - 1].latitude, lng: trail[trail.length - 1].longitude },
+        map: mapInstanceRef.current,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 6,
+          fillColor: '#10b981',
+          fillOpacity: 1,
+          strokeColor: 'white',
+          strokeWeight: 2,
+        },
+        zIndex: 200,
+      });
+      trailPolylinesRef.current.push(endMarker);
     }
   };
 
   useEffect(() => {
     if (selectedDriver && showTrails) {
       fetchDriverTrail(selectedDriver.id);
-    } else if (trailGroupRef.current) {
-      trailGroupRef.current.removeAll();
+    } else {
+      clearOverlays(trailPolylinesRef);
       setDriverTrail([]);
     }
   }, [selectedDriver, showTrails, trailHours]);
@@ -641,27 +553,24 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
   // Center map on driver
   const centerOnDriver = (driver: DriverLocation) => {
     if (!mapInstanceRef.current || !driver.last_known_lat || !driver.last_known_lng) return;
-    mapInstanceRef.current.setCenter({ lat: driver.last_known_lat, lng: driver.last_known_lng }, true);
-    mapInstanceRef.current.setZoom(14, true);
+    mapInstanceRef.current.panTo({ lat: driver.last_known_lat, lng: driver.last_known_lng });
+    mapInstanceRef.current.setZoom(14);
   };
 
-  // Reverse geocode for selected driver
+  // Reverse geocode for selected driver using Google Geocoding
   useEffect(() => {
     if (!selectedDriver?.last_known_lat || !selectedDriver?.last_known_lng) return;
     if (reverseGeoResults[selectedDriver.id]) return;
+    if (!geocoderRef.current) return;
 
     const reverseGeocode = async () => {
       try {
-        const { data } = await supabase.functions.invoke('here-webhook', {
-          body: {
-            action: 'reverse-geocode',
-            latitude: selectedDriver.last_known_lat,
-            longitude: selectedDriver.last_known_lng,
-          },
+        const latlng = { lat: selectedDriver.last_known_lat!, lng: selectedDriver.last_known_lng! };
+        geocoderRef.current.geocode({ location: latlng }, (results: any[], status: string) => {
+          if (status === 'OK' && results?.[0]) {
+            setReverseGeoResults(prev => ({ ...prev, [selectedDriver.id]: results[0].formatted_address }));
+          }
         });
-        if (data?.success && data.address) {
-          setReverseGeoResults(prev => ({ ...prev, [selectedDriver.id]: data.address }));
-        }
       } catch (err) {
         // Ignore
       }
@@ -674,130 +583,54 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
     await fetchDriverLocations();
   };
 
-  // Change map style - uses custom tile providers for satellite (old raster endpoints are deprecated/410)
+  // Change map style
   const changeMapStyle = (style: 'normal' | 'satellite' | 'terrain') => {
-    if (!mapInstanceRef.current || !platformRef.current || !mapApiKey) return;
-    
-    const H = window.H;
-    if (!H) return;
-    
+    if (!mapInstanceRef.current) return;
+
     setMapStyleError(null);
-    
+
     try {
-      if (style === 'normal') {
-        // Use the stored default vector layer (always works)
-        const layers = defaultLayersRef.current || platformRef.current.createDefaultLayers();
-        mapInstanceRef.current.setBaseLayer(layers.vector.normal.map);
-        setMapStyle('normal');
-        return;
+      switch (style) {
+        case 'normal':
+          mapInstanceRef.current.setMapTypeId('roadmap');
+          break;
+        case 'satellite':
+          mapInstanceRef.current.setMapTypeId('hybrid');
+          break;
+        case 'terrain':
+          mapInstanceRef.current.setMapTypeId('terrain');
+          break;
       }
-      
-      if (style === 'terrain') {
-        // Use vector truck layer instead of deprecated raster terrain
-        // This is more useful for a trucking TMS anyway
-        const layers = defaultLayersRef.current || platformRef.current.createDefaultLayers();
-        try {
-          // Try truck layer first
-          if (layers.vector?.normal?.truck) {
-            mapInstanceRef.current.setBaseLayer(layers.vector.normal.truck);
-            setMapStyle('terrain');
-            return;
-          }
-        } catch (e) {
-          console.warn('[LiveTracking] Truck layer not available, using normal map');
-        }
-        // Fallback to normal map
-        mapInstanceRef.current.setBaseLayer(layers.vector.normal.map);
-        setMapStyle('terrain');
-        return;
-      }
-      
-      if (style === 'satellite') {
-        // Create custom satellite tile layer using HERE Map Tile API v3
-        // The old raster.satellite.map uses deprecated endpoints that return 410
-        const cacheKey = 'satellite';
-        
-        if (!customLayersRef.current[cacheKey]) {
-          console.log('[LiveTracking] Creating custom satellite tile layer with HERE Map Tile API v3');
-          
-          // Try multiple HERE satellite tile URL patterns
-          const tileProvider = new H.map.provider.ImageTileProvider({
-            label: 'Satellite Tiles',
-            min: 1,
-            max: 19,
-            getURL: function(col: number, row: number, level: number) {
-              // HERE Map Tile API v3 satellite endpoint
-              // Server subdomains 1-4 for load balancing
-              const server = ((col + row) % 4) + 1;
-              return `https://${server}.aerial.maps.ls.hereapi.com/maptile/2.1/maptile/newest/satellite.day/${level}/${col}/${row}/256/png8?apiKey=${mapApiKey}`;
-            },
-          });
-          
-          // Also try the newer v3 endpoint as a fallback
-          const tileProviderV3 = new H.map.provider.ImageTileProvider({
-            label: 'Satellite Tiles V3',
-            min: 1,
-            max: 19,
-            getURL: function(col: number, row: number, level: number) {
-              return `https://maps.hereapi.com/v3/base/mc/${level}/${col}/${row}/png8?style=explore.satellite.day&size=256&apiKey=${mapApiKey}`;
-            },
-          });
-          
-          // Try the v3 endpoint first (newer, more likely to work)
-          customLayersRef.current[cacheKey] = new H.map.layer.TileLayer(tileProviderV3);
-          customLayersRef.current[cacheKey + '_fallback'] = new H.map.layer.TileLayer(tileProvider);
-        }
-        
-        try {
-          mapInstanceRef.current.setBaseLayer(customLayersRef.current[cacheKey]);
-          setMapStyle('satellite');
-          console.log('[LiveTracking] Satellite layer set (v3 API)');
-        } catch (layerErr) {
-          console.warn('[LiveTracking] V3 satellite failed, trying fallback:', layerErr);
-          try {
-            mapInstanceRef.current.setBaseLayer(customLayersRef.current[cacheKey + '_fallback']);
-            setMapStyle('satellite');
-          } catch (fallbackErr) {
-            console.error('[LiveTracking] All satellite layers failed:', fallbackErr);
-            setMapStyleError('Satellite view is temporarily unavailable');
-            // Fall back to normal map
-            const layers = defaultLayersRef.current || platformRef.current.createDefaultLayers();
-            mapInstanceRef.current.setBaseLayer(layers.vector.normal.map);
-            setMapStyle('normal');
-            setTimeout(() => setMapStyleError(null), 4000);
-          }
-        }
-        return;
-      }
+      setMapStyle(style);
     } catch (err) {
       console.error('[LiveTracking] Failed to change map style:', err);
       setMapStyleError('Failed to change map style');
       setTimeout(() => setMapStyleError(null), 4000);
-      // Ensure we fall back to a working layer
-      try {
-        const layers = defaultLayersRef.current || platformRef.current.createDefaultLayers();
-        mapInstanceRef.current.setBaseLayer(layers.vector.normal.map);
-        setMapStyle('normal');
-      } catch (e) {
-        // Last resort - ignore
-      }
     }
   };
 
-
   // Fit all drivers
   const fitAllDrivers = () => {
-    if (!mapInstanceRef.current || !markersGroupRef.current) return;
-    try {
-      const bounds = markersGroupRef.current.getBoundingBox();
-      if (bounds) {
-        mapInstanceRef.current.getViewModel().setLookAtData({
-          bounds,
-          padding: { top: 80, bottom: 80, left: sidebarOpen ? 420 : 80, right: 80 },
-        });
+    if (!mapInstanceRef.current || !window.google?.maps) return;
+
+    const google = window.google;
+    const bounds = new google.maps.LatLngBounds();
+    let hasBounds = false;
+
+    drivers.filter(d => d.has_position).forEach(driver => {
+      if (driver.last_known_lat && driver.last_known_lng) {
+        bounds.extend({ lat: driver.last_known_lat, lng: driver.last_known_lng });
+        hasBounds = true;
       }
-    } catch (e) {
-      // Ignore
+    });
+
+    if (hasBounds) {
+      mapInstanceRef.current.fitBounds(bounds, {
+        top: 80,
+        bottom: 80,
+        left: sidebarOpen ? 420 : 80,
+        right: 80,
+      });
     }
   };
 
@@ -814,7 +647,7 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
   const filteredDrivers = drivers.filter(d => {
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
-      return d.name.toLowerCase().includes(term) || 
+      return d.name.toLowerCase().includes(term) ||
              d.truck_number.toLowerCase().includes(term) ||
              d.active_load?.load_number.toLowerCase().includes(term);
     }
@@ -838,7 +671,7 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
             </div>
             <div>
               <h1 className="text-lg font-bold text-white">Live Fleet Tracking</h1>
-              <p className="text-xs text-slate-400">HERE Maps GPS Monitoring</p>
+              <p className="text-xs text-slate-400">Google Maps GPS Monitoring</p>
             </div>
           </div>
         </div>
@@ -1039,10 +872,10 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
         <button
           onClick={() => {
             setSidebarOpen(!sidebarOpen);
-            // Resize map after sidebar animation completes
+            // Google Maps auto-resizes, but trigger resize just in case
             setTimeout(() => {
-              if (mapInstanceRef.current) {
-                try { mapInstanceRef.current.getViewPort().resize(); } catch { /* */ }
+              if (mapInstanceRef.current && window.google?.maps) {
+                window.google.maps.event.trigger(mapInstanceRef.current, 'resize');
               }
             }, 350);
           }}
@@ -1056,11 +889,11 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
 
         {/* Map Container */}
         <div className="flex-1 relative">
-          {!mapLoaded || !mapApiKey ? (
+          {!mapLoaded ? (
             <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
               <div className="text-center">
                 <Loader2 className="w-10 h-10 animate-spin text-blue-500 mx-auto mb-4" />
-                <p className="text-slate-300 font-medium">Loading HERE Maps...</p>
+                <p className="text-slate-300 font-medium">Loading Google Maps...</p>
                 <p className="text-slate-500 text-sm mt-1">Initializing GPS tracking interface</p>
               </div>
             </div>
@@ -1093,7 +926,7 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
                   mapStyle === 'terrain' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                Truck
+                Terrain
               </button>
             </div>
 
