@@ -156,26 +156,36 @@ const LocationsView: React.FC<LocationsViewProps> = ({ onBack, defaultTab = 'shi
           .from('locations')
           .update(submitData)
           .eq('id', editingLocation.id);
-        
-        if (!error) {
-          // Auto-geocode after update (fire-and-forget with local state update)
-          geocodeLocation(
-            editingLocation.id,
-            submitData.address,
-            submitData.city,
-            submitData.state,
-            submitData.zip,
-            submitData.geofence_radius
-          );
+
+        if (error) {
+          console.error('Error updating location:', error);
+          alert('Failed to update location: ' + error.message);
+          setSaving(false);
+          return;
         }
+        // Auto-geocode after update (fire-and-forget with local state update)
+        geocodeLocation(
+          editingLocation.id,
+          submitData.address,
+          submitData.city,
+          submitData.state,
+          submitData.zip,
+          submitData.geofence_radius
+        );
       } else {
         const { data: inserted, error } = await supabase
           .from('locations')
           .insert(submitData)
           .select()
           .single();
-        
-        if (inserted && !error) {
+
+        if (error) {
+          console.error('Error creating location:', error);
+          alert('Failed to create location: ' + error.message);
+          setSaving(false);
+          return;
+        }
+        if (inserted) {
           // Auto-geocode the new location
           geocodeLocation(
             inserted.id,
@@ -191,6 +201,7 @@ const LocationsView: React.FC<LocationsViewProps> = ({ onBack, defaultTab = 'shi
       fetchLocations();
     } catch (error) {
       console.error('Error saving location:', error);
+      alert('An unexpected error occurred while saving.');
     } finally {
       setSaving(false);
     }
