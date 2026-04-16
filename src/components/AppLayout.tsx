@@ -94,11 +94,14 @@ const AppLayout: React.FC = () => {
     }
   }, [currentView]);
 
-  // Handle demo logout → navigate back to landing page
+  // Handle logout — clear session and navigate
   const handleLogout = () => {
     logout();
     if (isDemo) {
       navigate('/');
+    } else {
+      // Force navigation to /app which will show LoginPage since user is now null
+      navigate('/app');
     }
   };
 
@@ -635,7 +638,7 @@ const AppLayout: React.FC = () => {
                 <p className="text-xs text-slate-500 truncate">{user.email}</p>
               </div>
             )}
-            <button onClick={logout} className="flex items-center gap-3 px-4 py-3 text-red-400 hover:bg-red-500/10 rounded-xl transition-colors w-full text-left">
+            <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-3 text-red-400 hover:bg-red-500/10 rounded-xl transition-colors w-full text-left">
               <LogOut className="w-5 h-5" /><span className="font-medium">Sign Out</span>
             </button>
           </div>
