@@ -98,17 +98,30 @@ const CustomersView: React.FC<CustomersViewProps> = ({ onBack }) => {
 
     try {
       if (editingCustomer) {
-        await supabase
+        const { error } = await supabase
           .from('customers')
           .update(formData)
           .eq('id', editingCustomer.id);
+        if (error) {
+          console.error('Error updating customer:', error);
+          alert('Failed to update customer: ' + error.message);
+          setSaving(false);
+          return;
+        }
       } else {
-        await supabase.from('customers').insert(formData);
+        const { error } = await supabase.from('customers').insert(formData);
+        if (error) {
+          console.error('Error creating customer:', error);
+          alert('Failed to create customer: ' + error.message);
+          setSaving(false);
+          return;
+        }
       }
       setModalOpen(false);
       fetchCustomers();
     } catch (error) {
       console.error('Error saving customer:', error);
+      alert('An unexpected error occurred while saving.');
     } finally {
       setSaving(false);
     }
