@@ -121,6 +121,10 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
     const loadId = load.id;
     setLoading(true);
 
+    if (load.customer) {
+      setCustomer(load.customer);
+    }
+
     // Fetch customer if load has customer_id (needed for email button to enable)
     if (load.customer_id) {
       const { data: cust } = await supabase
@@ -691,6 +695,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
   const activeGeofences = geofences.filter(g => g.status === 'active');
   const canUnassign = load.driver_id && ['DISPATCHED', 'IN_TRANSIT'].includes(load.status);
   const canReassign = load.driver_id && ['DISPATCHED', 'IN_TRANSIT'].includes(load.status);
+  const customerEmail = (customer?.pod_email || customer?.email || '').trim();
 
   // Calculate how many stops have geocoded locations
   const geocodedStopCount = stops.filter(s => locationGeofenceStatus[s.id]).length;
@@ -1513,7 +1518,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">To:</label>
                 <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900">
-                  {(load.customer?.pod_email || load.customer?.email || '').trim() || 'No customer email configured'}
+                  {customerEmail || 'No customer email configured'}
                 </div>
               </div>
 
@@ -1572,7 +1577,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
               </button>
               <button
                 onClick={handleSendInvoiceEmail}
-                disabled={sendingInvoiceEmail || !(load.customer?.pod_email || load.customer?.email || '').trim()}
+                disabled={sendingInvoiceEmail || !customerEmail}
                 className="flex-1 px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
               >
                 {sendingInvoiceEmail ? (
