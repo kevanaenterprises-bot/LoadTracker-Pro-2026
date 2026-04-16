@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, User, Phone, MapPin, Truck, Send, Loader2, CheckCircle, AlertCircle, UserMinus, Brain, Sparkles, Star, ChevronDown, ChevronUp, Zap } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Driver, Load } from '@/types/tms';
-import { useUsage } from '@/contexts/UsageContext';
+// useUsage removed — usage gates disabled for owner account
 
 interface AIRecommendation {
   driver_id: string;
@@ -41,12 +41,7 @@ const AssignDriverModal: React.FC<AssignDriverModalProps> = ({ isOpen, load, onC
   const [aiError, setAiError] = useState<string | null>(null);
   const [showAiPanel, setShowAiPanel] = useState(false);
 
-  let usageCtx: ReturnType<typeof useUsage> | null = null;
-  try {
-    usageCtx = useUsage();
-  } catch {
-    // UsageProvider not available (e.g., in demo mode)
-  }
+  // Usage tracking removed — no limits for owner account
 
   useEffect(() => {
     if (isOpen) {
@@ -77,12 +72,6 @@ const AssignDriverModal: React.FC<AssignDriverModalProps> = ({ isOpen, load, onC
 
   const handleAskAI = async () => {
     if (!load) return;
-
-    // Check usage limit
-    if (usageCtx) {
-      const canUse = usageCtx.checkAndPromptUpgrade('ai_dispatch_calls');
-      if (!canUse) return;
-    }
 
     setAiLoading(true);
     setAiError(null);
@@ -115,11 +104,6 @@ const AssignDriverModal: React.FC<AssignDriverModalProps> = ({ isOpen, load, onC
       if (error) throw error;
 
       setAiResponse(data as AIResponse);
-
-      // Track usage
-      if (usageCtx) {
-        await usageCtx.incrementUsage('ai_dispatch_calls');
-      }
     } catch (err: any) {
       console.error('AI Dispatch Advisor error:', err);
       setAiError(err.message || 'Failed to get AI recommendations. Please try again.');
@@ -148,12 +132,6 @@ const AssignDriverModal: React.FC<AssignDriverModalProps> = ({ isOpen, load, onC
 
   const handleAssignAndSendSms = async () => {
     if (!selectedDriver || !load) return;
-
-    // Track SMS usage
-    if (usageCtx) {
-      const canSend = await usageCtx.incrementUsage('sms_sent');
-      if (!canSend) return;
-    }
 
     setSendingSms(true);
     setSmsError(null);
