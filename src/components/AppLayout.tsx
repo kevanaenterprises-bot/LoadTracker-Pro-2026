@@ -363,10 +363,6 @@ const AppLayout: React.FC = () => {
     fetchData();
   };
   const handleGenerateInvoice = async (load: Load) => {
-    // Check usage limit for invoices
-    const canGenerate = await incrementUsage('invoices_generated');
-    if (!canGenerate) return;
-
     const invoiceNumber = await generateNextInvoiceNumber();
     const totalAmount = Number(load.rate || 0) + Number(load.extra_stop_fee || 0) + Number(load.lumper_fee || 0);
 
@@ -391,12 +387,11 @@ const AppLayout: React.FC = () => {
 
   // Usage-gated create load
   const handleNewLoad = () => {
-    if (!checkAndPromptUpgrade('loads_created')) return;
+    // Usage limits removed for owner account
     setCreateModalOpen(true);
   };
 
   const handleLoadCreated = async () => {
-    await incrementUsage('loads_created');
     fetchData();
   };
 
@@ -918,7 +913,7 @@ const AppLayout: React.FC = () => {
       <AssignDriverModal isOpen={assignModalOpen} load={selectedLoad} onClose={() => { setAssignModalOpen(false); setSelectedLoad(null); }} onDriverAssigned={fetchData} />
       <LoadDetailsModal isOpen={detailsModalOpen} load={selectedLoad} onClose={() => { setDetailsModalOpen(false); setSelectedLoad(null); }} onEdit={handleEditLoad} onDelete={handleDeleteLoad} onLoadUpdated={fetchData} onAssignDriver={handleAssignDriver} />
       <RecordPaymentModal isOpen={paymentModalOpen} load={selectedLoad} onClose={() => { setPaymentModalOpen(false); setSelectedLoad(null); }} onPaymentRecorded={handlePaymentRecorded} />
-      <UpgradeModal />
+      {/* UpgradeModal removed — not needed for owner account */}
     </div>
   );
 };
