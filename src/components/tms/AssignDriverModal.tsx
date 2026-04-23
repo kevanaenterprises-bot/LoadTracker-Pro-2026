@@ -195,14 +195,6 @@ const AssignDriverModal: React.FC<AssignDriverModalProps> = ({ isOpen, load, onC
         setSmsError(`Driver assigned! SMS error: ${smsErr.message}. Use "Resend SMS" from load details.`);
       }
 
-      supabase.functions.invoke('here-webhook', {
-        body: { action: 'setup-load-geofences', load_id: load.id },
-      }).catch(() => {});
-
-      supabase.functions.invoke('here-webhook', {
-        body: { action: 'register-device', driver_id: selectedDriver.id, device_name: `${selectedDriver.name}'s Device` },
-      }).catch(() => {});
-
       setTimeout(() => {
         onDriverAssigned();
         onClose();

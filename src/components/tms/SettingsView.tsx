@@ -3,7 +3,7 @@ import { supabase, supabaseUrl, supabaseKey } from '@/lib/supabase';
 import { 
   ArrowLeft, Settings, Phone, CheckCircle, 
   AlertCircle, MessageSquare, TestTube, Loader2, Info,
-  Radar, Globe, Copy, Wifi, ShieldCheck, MapPin, Activity,
+  Copy, Activity,
   FileText, Mail, ToggleLeft, ToggleRight, Send, ExternalLink, AtSign,
   Database, Wrench, AlertTriangle, XCircle, Server, Lock, RefreshCw, Zap
 } from 'lucide-react';
@@ -13,23 +13,11 @@ interface SettingsViewProps {
   onBack: () => void;
 }
 
-interface GeofenceStats {
-  total_geofences: number;
-  active_geofences: number;
-  total_devices: number;
-  total_webhook_events: number;
-  processed_events: number;
-}
 
 const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   const [testPhone, setTestPhone] = useState('');
   const [sendingTest, setSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
-
-  const [geofenceStats, setGeofenceStats] = useState<GeofenceStats | null>(null);
-  const [loadingStats, setLoadingStats] = useState(false);
-  const [webhookUrlCopied, setWebhookUrlCopied] = useState(false);
-  const [defaultRadius, setDefaultRadius] = useState(500);
 
   // Auto-invoice settings
   const [autoInvoiceEnabled, setAutoInvoiceEnabled] = useState(false);
@@ -62,10 +50,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   const [backfillRunning, setBackfillRunning] = useState(false);
   const [backfillResult, setBackfillResult] = useState<{ success: boolean; message: string; count?: number } | null>(null);
 
-  const webhookUrl = `${window.location.origin.includes('localhost') ? 'https://tlksfrowyjprvjerydrp.supabase.co' : ''}/functions/v1/here-webhook`;
-
   useEffect(() => {
-    fetchGeofenceStats();
     fetchSettings();
     checkCustomerIdColumn();
   }, []);
@@ -223,29 +208,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
 
 
 
-  const fetchGeofenceStats = async () => {
-    setLoadingStats(true);
-    try {
-      const { count: totalGf } = await supabase.from('here_geofences').select('*', { count: 'exact', head: true });
-      const { count: activeGf } = await supabase.from('here_geofences').select('*', { count: 'exact', head: true }).eq('status', 'active');
-      const { count: totalDevices } = await supabase.from('here_devices').select('*', { count: 'exact', head: true }).eq('status', 'active');
-      const { count: totalEvents } = await supabase.from('here_webhook_events').select('*', { count: 'exact', head: true });
-      const { count: processedEvents } = await supabase.from('here_webhook_events').select('*', { count: 'exact', head: true }).eq('processed', true);
-
-      setGeofenceStats({
-        total_geofences: totalGf || 0,
-        active_geofences: activeGf || 0,
-        total_devices: totalDevices || 0,
-        total_webhook_events: totalEvents || 0,
-        processed_events: processedEvents || 0,
-      });
-    } catch (err) {
-      console.warn('Failed to fetch geofence stats:', err);
-    } finally {
-      setLoadingStats(false);
-    }
-  };
-
   const handleSendTestSms = async () => {
     if (!testPhone) { setTestResult({ success: false, message: 'Please enter a test phone number' }); return; }
     setSendingTest(true);
@@ -267,12 +229,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     } finally {
       setSendingTest(false);
     }
-  };
-
-  const handleCopyWebhookUrl = () => {
-    navigator.clipboard.writeText(webhookUrl);
-    setWebhookUrlCopied(true);
-    setTimeout(() => setWebhookUrlCopied(false), 2000);
   };
 
   const formatPhoneNumber = (value: string) => {
@@ -1116,7 +1072,7 @@ CREATE INDEX IF NOT EXISTS idx_loads_customer_id ON loads(customer_id);`;
                   <h4 className="font-medium text-blue-800 mb-2">SMS now includes:</h4>
                   <ul className="text-sm text-blue-700 space-y-1 list-disc list-inside">
                     <li>Load number and route (origin to destination)</li>
-                    <li>Total miles (calculated via HERE Maps)</li>
+                    <li>Total miles (enter manually or calculated via Google Maps)</li>
                     <li>Pickup and delivery dates</li>
                     <li>Load rate</li>
                     <li>Acceptance link for the Driver Portal</li>
@@ -1159,89 +1115,6 @@ CREATE INDEX IF NOT EXISTS idx_loads_customer_id ON loads(customer_id);`;
           </div>
         </div>
 
-        {/* HERE Maps Geofencing Settings */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="px-6 py-4 bg-gradient-to-r from-cyan-600 to-blue-600">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-white/20 rounded-lg">
-                <Radar className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-white">HERE Maps Geofencing</h3>
-                <p className="text-cyan-200 text-sm">GPS-verified geofence tracking for automated timestamps</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-6 space-y-6">
-            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3">
-              <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <h4 className="font-medium text-emerald-800">HERE API Configured</h4>
-                <p className="text-sm text-emerald-700 mt-1">Geocoding, routing, and geofence verification are active.</p>
-              </div>
-            </div>
-
-            {loadingStats ? (
-              <div className="flex items-center justify-center py-6"><Loader2 className="w-6 h-6 animate-spin text-cyan-600" /></div>
-            ) : geofenceStats && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="bg-cyan-50 border border-cyan-200 rounded-xl p-4 text-center">
-                  <Radar className="w-5 h-5 text-cyan-600 mx-auto mb-2" />
-                  <p className="text-2xl font-bold text-cyan-700">{geofenceStats.active_geofences}</p>
-                  <p className="text-xs text-cyan-600 font-medium">Active Geofences</p>
-                </div>
-                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
-                  <MapPin className="w-5 h-5 text-blue-600 mx-auto mb-2" />
-                  <p className="text-2xl font-bold text-blue-700">{geofenceStats.total_geofences}</p>
-                  <p className="text-xs text-blue-600 font-medium">Total Geofences</p>
-                </div>
-                <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 text-center">
-                  <Wifi className="w-5 h-5 text-indigo-600 mx-auto mb-2" />
-                  <p className="text-2xl font-bold text-indigo-700">{geofenceStats.total_devices}</p>
-                  <p className="text-xs text-indigo-600 font-medium">Tracked Devices</p>
-                </div>
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
-                  <Activity className="w-5 h-5 text-emerald-600 mx-auto mb-2" />
-                  <p className="text-2xl font-bold text-emerald-700">{geofenceStats.total_webhook_events}</p>
-                  <p className="text-xs text-emerald-600 font-medium">Webhook Events</p>
-                </div>
-              </div>
-            )}
-
-            <div className="pt-4 border-t border-slate-200">
-              <h4 className="font-medium text-slate-800 mb-2 flex items-center gap-2">
-                <Globe className="w-5 h-5 text-slate-600" />
-                Webhook Endpoint URL
-              </h4>
-              <div className="flex gap-2">
-                <div className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 font-mono text-sm text-slate-700 overflow-x-auto">
-                  {webhookUrl}
-                </div>
-                <button onClick={handleCopyWebhookUrl} className={`px-4 py-3 rounded-xl font-medium transition-all flex items-center gap-2 ${webhookUrlCopied ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200'}`}>
-                  {webhookUrlCopied ? (<><CheckCircle className="w-4 h-4" />Copied</>) : (<><Copy className="w-4 h-4" />Copy</>)}
-                </button>
-              </div>
-            </div>
-
-            <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
-              <div className="flex items-start gap-3">
-                <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="font-medium text-blue-800 mb-2">Tracking Workflow (Updated):</h4>
-                  <ul className="text-sm text-blue-700 space-y-1.5 list-disc list-inside">
-                    <li><strong>Before dispatch:</strong> Open Edit Load and click "Initiate Tracking" to set up geofences and calculate mileage</li>
-                    <li><strong>On dispatch:</strong> Geofences are also auto-created when assigning a driver (as a backup)</li>
-                    <li>Mileage is calculated via HERE Routing API and included in the dispatch SMS</li>
-                    <li>Driver can view route map in the Driver Portal</li>
-                    <li>GPS tracking from driver's phone checks geofence boundaries every 30 seconds</li>
-                    <li>Arrival/departure timestamps are auto-recorded and GPS-verified</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
       </main>
     </div>
   );

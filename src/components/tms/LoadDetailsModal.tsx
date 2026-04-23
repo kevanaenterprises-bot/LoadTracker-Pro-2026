@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, MapPin, Calendar, Package, DollarSign, User, Truck, FileText, Download, Clock, Pencil, Trash2, Eye, Radar, ShieldCheck, Loader2, Wifi, WifiOff, Activity, AlertTriangle, Send, Phone, UserMinus, UserPlus, CheckCircle, Mail, AlertCircle } from 'lucide-react';
+import { X, MapPin, Calendar, Package, DollarSign, User, Truck, FileText, Download, Clock, Pencil, Trash2, Eye, Loader2, AlertTriangle, Send, Phone, UserMinus, UserPlus, CheckCircle, Mail, AlertCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { generateNextInvoiceNumber } from '@/lib/invoiceUtils';
 import { Load, PODDocument, Invoice, LoadStop } from '@/types/tms';
@@ -8,28 +8,6 @@ import InvoicePreviewModal from './InvoicePreviewModal';
 
 
 
-interface GeofenceRecord {
-  id: string;
-  stop_id: string;
-  here_geofence_id: string;
-  geofence_name: string;
-  center_lat: number;
-  center_lng: number;
-  radius_meters: number;
-  status: string;
-  created_at: string;
-}
-
-interface WebhookEvent {
-  id: string;
-  event_type: string;
-  here_device_id: string;
-  latitude: number;
-  longitude: number;
-  event_timestamp: string;
-  processed: boolean;
-  stop_id: string;
-}
 
 interface LoadDetailsModalProps {
   isOpen: boolean;
@@ -67,15 +45,10 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
   const [loading, setLoading] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showInvoicePreview, setShowInvoicePreview] = useState(false);
-  const [geofences, setGeofences] = useState<GeofenceRecord[]>([]);
-  const [webhookEvents, setWebhookEvents] = useState<WebhookEvent[]>([]);
-  const [settingUpGeofences, setSettingUpGeofences] = useState(false);
-  const [geofenceSetupResult, setGeofenceSetupResult] = useState<string | null>(null);
   const [resendingSms, setResendingSms] = useState(false);
   const [resendSmsResult, setResendSmsResult] = useState<{ success: boolean; message: string } | null>(null);
   const [unassigning, setUnassigning] = useState(false);
   const [showUnassignConfirm, setShowUnassignConfirm] = useState(false);
-  const [locationGeofenceStatus, setLocationGeofenceStatus] = useState<Record<string, { lat: number; lng: number; radius: number } | null>>({});
 
   // Invoice generation & email sending state
   const [generatingInvoice, setGeneratingInvoice] = useState(false);
@@ -102,10 +75,8 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
       fetchDetails();
       setShowDeleteConfirm(false);
       setShowInvoicePreview(false);
-      setGeofenceSetupResult(null);
       setResendSmsResult(null);
       setShowUnassignConfirm(false);
-      setSettingUpGeofences(false);
       setInvoiceEmailResult(null);
       setGeneratingInvoice(false);
       setSendingInvoiceEmail(false);
@@ -168,310 +139,13 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
     if (currentLoadIdRef.current !== loadId) return;
     if (loadStops) {
       setStops(loadStops);
-      // Check location geofence status for each stop
-      await checkLocationGeofenceStatus(loadStops, loadId);
     }
-
-    // Fetch geofences for this load
-    await fetchGeofenceData(loadId);
 
     if (currentLoadIdRef.current === loadId) {
       setLoading(false);
     }
   };
 
-  const checkLocationGeofenceStatus = async (loadStops: LoadStop[], loadId: string) => {
-    const statusMap: Record<string, { lat: number; lng: number; radius: number } | null> = {};
-    
-    for (const stop of loadStops) {
-      if (stop.location_id) {
-        const { data: loc } = await supabase
-          .from('locations')
-          .select('latitude, longitude, geofence_radius')
-          .eq('id', stop.location_id)
-          .single();
-        
-        if (currentLoadIdRef.current !== loadId) return;
-        
-        if (loc?.latitude && loc?.longitude) {
-          statusMap[stop.id] = {
-            lat: loc.latitude,
-            lng: loc.longitude,
-            radius: loc.geofence_radius || 500,
-          };
-        } else {
-          statusMap[stop.id] = null;
-        }
-      }
-    }
-    
-    if (currentLoadIdRef.current === loadId && isMountedRef.current) {
-      setLocationGeofenceStatus(statusMap);
-    }
-  };
-
-  const fetchGeofenceData = async (loadId: string) => {
-    try {
-      const { data, error } = await supabase.functions.invoke('here-webhook', {
-        body: {
-          action: 'get-load-geofences',
-          load_id: loadId,
-        },
-      });
-      if (currentLoadIdRef.current !== loadId) return;
-      if (data?.geofences) setGeofences(data.geofences);
-      if (data?.webhook_events) setWebhookEvents(data.webhook_events);
-    } catch (err) {
-      console.warn('Failed to fetch geofence data:', err);
-    }
-  };
-
-  const handleSetupGeofences = async () => {
-    if (!load) return;
-    const loadId = load.id;
-    setSettingUpGeofences(true);
-    setGeofenceSetupResult(null);
-
-    try {
-      // STEP 1: Ensure every stop has a location_id (create locations if needed)
-      for (const stop of stops) {
-        if (!stop.location_id) {
-          const locationType = stop.stop_type === 'pickup' ? 'shipper' : 'receiver';
-          const { data: newLoc, error: locError } = await supabase
-            .from('locations')
-            .insert({
-              company_name: stop.company_name || `${stop.city}, ${stop.state}`,
-              address: stop.address || '',
-              city: stop.city,
-              state: stop.state,
-              zip: stop.zip || '',
-              contact_name: stop.contact_name || '',
-              contact_phone: stop.contact_phone || '',
-              instructions: stop.instructions || '',
-              location_type: locationType,
-              geofence_radius: 500,
-              rate: 0,
-            })
-            .select()
-            .single();
-
-          if (currentLoadIdRef.current !== loadId || !isMountedRef.current) return;
-
-          if (locError) {
-            console.warn(`Failed to create location for stop ${stop.id}:`, locError.message);
-            continue;
-          }
-
-          if (newLoc) {
-            await supabase
-              .from('load_stops')
-              .update({ location_id: newLoc.id })
-              .eq('id', stop.id);
-
-            if (currentLoadIdRef.current !== loadId || !isMountedRef.current) return;
-
-            stop.location_id = newLoc.id;
-            console.log(`Created location ${newLoc.id} for stop ${stop.id} (${stop.company_name || stop.city})`);
-          }
-        }
-      }
-
-      // STEP 2: Geocode all locations that don't have coordinates yet
-      // Use geocode-location (fast path - no Supabase in edge function) + direct DB update from frontend
-      let geocodeSuccessCount = 0;
-      let geocodeFailCount = 0;
-
-      for (const stop of stops) {
-        if (!stop.location_id) continue;
-
-        // Check if location already has coordinates
-        const { data: locData } = await supabase
-          .from('locations')
-          .select('latitude, longitude, address, city, state, zip, geofence_radius')
-          .eq('id', stop.location_id)
-          .single();
-
-        if (currentLoadIdRef.current !== loadId || !isMountedRef.current) return;
-
-        if (locData?.latitude && locData?.longitude) {
-          geocodeSuccessCount++;
-          continue; // Already geocoded
-        }
-
-        // Build address for geocoding
-        const addressToGeocode = locData?.address || stop.address || '';
-        const cityToGeocode = locData?.city || stop.city || '';
-        const stateToGeocode = locData?.state || stop.state || '';
-        const zipToGeocode = locData?.zip || stop.zip || '';
-        const radius = locData?.geofence_radius || 500;
-
-        try {
-          // Use geocode-location action (fast path - no Supabase needed in edge function)
-          const { data: geoResult, error: geoError } = await supabase.functions.invoke('here-webhook', {
-            body: {
-              action: 'geocode-location',
-              address: addressToGeocode,
-              city: cityToGeocode,
-              state: stateToGeocode,
-              zip: zipToGeocode,
-            },
-          });
-
-          if (currentLoadIdRef.current !== loadId || !isMountedRef.current) return;
-
-          if (geoResult?.success && geoResult.latitude && geoResult.longitude) {
-            // Update location directly from frontend (bypasses edge function Supabase client issues)
-            const { error: updateError } = await supabase
-              .from('locations')
-              .update({
-                latitude: geoResult.latitude,
-                longitude: geoResult.longitude,
-                geofence_radius: radius,
-              })
-              .eq('id', stop.location_id);
-
-            if (currentLoadIdRef.current !== loadId || !isMountedRef.current) return;
-
-            if (updateError) {
-              console.warn(`Failed to save coordinates for location ${stop.location_id}:`, updateError.message);
-              geocodeFailCount++;
-            } else {
-              geocodeSuccessCount++;
-              console.log(`Geocoded & saved location ${stop.location_id}: ${geoResult.latitude}, ${geoResult.longitude}`);
-            }
-          } else {
-            geocodeFailCount++;
-            console.warn(`Geocode failed for stop ${stop.company_name || stop.city}:`, geoResult?.error || geoError?.message);
-          }
-        } catch (geoErr: any) {
-          geocodeFailCount++;
-          console.warn(`Geocode error for location ${stop.location_id}:`, geoErr.message);
-        }
-      }
-
-      if (currentLoadIdRef.current !== loadId || !isMountedRef.current) return;
-
-      // STEP 3: Create geofence records directly from frontend
-      if (geocodeSuccessCount > 0) {
-        // Deactivate any existing geofences for this load
-        await supabase
-          .from('here_geofences')
-          .update({ status: 'inactive', updated_at: new Date().toISOString() })
-          .eq('load_id', loadId);
-
-        if (currentLoadIdRef.current !== loadId || !isMountedRef.current) return;
-
-        let geofencesCreated = 0;
-        const geofenceErrors: string[] = [];
-
-        for (const stop of stops) {
-          if (!stop.location_id) continue;
-
-          // Get the freshly geocoded coordinates
-          const { data: loc } = await supabase
-            .from('locations')
-            .select('latitude, longitude, geofence_radius')
-            .eq('id', stop.location_id)
-            .single();
-
-          if (currentLoadIdRef.current !== loadId || !isMountedRef.current) return;
-
-          if (loc?.latitude && loc?.longitude) {
-            const gfName = `${stop.stop_type === 'pickup' ? 'Pickup' : 'Delivery'} - ${stop.company_name || stop.city || 'Stop'}`;
-            const gfId = `gf_${loadId}_${stop.id}`.substring(0, 64);
-
-            const { error: insertErr } = await supabase
-              .from('here_geofences')
-              .insert({
-                load_id: loadId,
-                stop_id: stop.id,
-                location_id: stop.location_id,
-                here_geofence_id: gfId,
-                geofence_name: gfName,
-                center_lat: loc.latitude,
-                center_lng: loc.longitude,
-                radius_meters: loc.geofence_radius || 500,
-                status: 'active',
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              });
-
-            if (currentLoadIdRef.current !== loadId || !isMountedRef.current) return;
-
-            if (insertErr) {
-              geofenceErrors.push(`${gfName}: ${insertErr.message}`);
-            } else {
-              geofencesCreated++;
-            }
-          }
-        }
-
-        // Enable tracking on the load
-        await supabase.from('loads').update({ tracking_enabled: true }).eq('id', loadId);
-
-        // Calculate total miles from geofence points
-        const { data: activeGf } = await supabase
-          .from('here_geofences')
-          .select('center_lat, center_lng')
-          .eq('load_id', loadId)
-          .eq('status', 'active')
-          .order('created_at');
-
-        if (activeGf && activeGf.length >= 2) {
-          let totalMeters = 0;
-          for (let i = 0; i < activeGf.length - 1; i++) {
-            const R = 6371000;
-            const dLat = (activeGf[i + 1].center_lat - activeGf[i].center_lat) * Math.PI / 180;
-            const dLon = (activeGf[i + 1].center_lng - activeGf[i].center_lng) * Math.PI / 180;
-            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(activeGf[i].center_lat * Math.PI / 180) * Math.cos(activeGf[i + 1].center_lat * Math.PI / 180) *
-              Math.sin(dLon / 2) * Math.sin(dLon / 2);
-            totalMeters += R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-          }
-          const totalMiles = Math.round((totalMeters / 1609.344) * 10) / 10;
-          await supabase.from('loads').update({ total_miles: totalMiles }).eq('id', loadId);
-        }
-
-        if (currentLoadIdRef.current !== loadId || !isMountedRef.current) return;
-
-        if (geofencesCreated > 0) {
-          const msg = `${geocodeSuccessCount} location(s) geocoded, ${geofencesCreated} geofence(s) created successfully`;
-          setGeofenceSetupResult(msg);
-          await fetchGeofenceData(loadId);
-        } else {
-          setGeofenceSetupResult(geofenceErrors.join('; ') || 'Geocoded locations but failed to create geofence records');
-        }
-      } else if (geocodeFailCount > 0) {
-        setGeofenceSetupResult(`Failed to geocode ${geocodeFailCount} location(s). Check that addresses are valid and complete.`);
-      } else {
-        setGeofenceSetupResult('No stops with valid addresses found to geocode.');
-      }
-
-      // Refresh location geofence status
-      if (currentLoadIdRef.current === loadId && isMountedRef.current) {
-        const { data: updatedStops } = await supabase
-          .from('load_stops')
-          .select('*')
-          .eq('load_id', loadId)
-          .order('stop_type')
-          .order('stop_sequence');
-
-        if (currentLoadIdRef.current === loadId && isMountedRef.current && updatedStops) {
-          setStops(updatedStops);
-          await checkLocationGeofenceStatus(updatedStops, loadId);
-        }
-      }
-
-    } catch (err: any) {
-      if (currentLoadIdRef.current === loadId && isMountedRef.current) {
-        setGeofenceSetupResult(`Error: ${err.message}`);
-      }
-    } finally {
-      if (currentLoadIdRef.current === loadId && isMountedRef.current) {
-        setSettingUpGeofences(false);
-      }
-    }
-  };
 
 
 
@@ -546,13 +220,6 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
           accepted_at: null,
         })
         .eq('id', load.id);
-
-      // Deactivate geofences (fire-and-forget)
-      supabase.functions.invoke('here-webhook', {
-        body: { action: 'deactivate-load-geofences', load_id: load.id },
-      }).catch((err) => {
-        console.warn('Geofence deactivation failed (non-critical):', err);
-      });
 
       console.log(`Unassigned driver ${load.driver?.name} from load ${load.load_number}`);
 
@@ -692,15 +359,9 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
   const colors = statusColors[load.status] || statusColors.UNASSIGNED;
   const pickupStops = stops.filter(s => s.stop_type === 'pickup');
   const deliveryStops = stops.filter(s => s.stop_type === 'delivery');
-  const activeGeofences = geofences.filter(g => g.status === 'active');
   const canUnassign = load.driver_id && ['DISPATCHED', 'IN_TRANSIT'].includes(load.status);
   const canReassign = load.driver_id && ['DISPATCHED', 'IN_TRANSIT'].includes(load.status);
   const customerEmail = (customer?.pod_email || customer?.email || '').trim();
-
-  // Calculate how many stops have geocoded locations
-  const geocodedStopCount = stops.filter(s => locationGeofenceStatus[s.id]).length;
-  const totalStopCount = stops.length;
-  const allStopsGeocoded = totalStopCount > 0 && geocodedStopCount === totalStopCount;
 
   return (
     <>
@@ -716,18 +377,6 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                 </span>
                 {load.bol_number && (
                   <span className="text-xs text-slate-400">BOL: {load.bol_number}</span>
-                )}
-                {activeGeofences.length > 0 && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-cyan-500/20 text-cyan-300">
-                    <Radar className="w-3 h-3" />
-                    {activeGeofences.length} Geofence{activeGeofences.length !== 1 ? 's' : ''}
-                  </span>
-                )}
-                {activeGeofences.length === 0 && allStopsGeocoded && totalStopCount > 0 && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-300">
-                    <CheckCircle className="w-3 h-3" />
-                    Geofence Ready
-                  </span>
                 )}
               </div>
             </div>
@@ -829,10 +478,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                       Shipper(s) - Pickup Location(s)
                     </h3>
                     <div className="space-y-3">
-                      {pickupStops.map((stop, index) => {
-                        const stopGeofence = geofences.find(g => g.stop_id === stop.id && g.status === 'active');
-                        const locGeo = locationGeofenceStatus[stop.id];
-                        return (
+                      {pickupStops.map((stop, index) => (
                           <div key={stop.id} className="bg-white rounded-lg p-3 border border-blue-100">
                             <div className="flex items-start gap-3">
                               <div className="w-6 h-6 rounded-full bg-blue-500 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
@@ -849,22 +495,9 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                                   <p className="text-xs text-slate-500 mt-1">Contact: {stop.contact_name} {stop.contact_phone && `- ${stop.contact_phone}`}</p>
                                 )}
                               </div>
-                              {/* Geofence indicator */}
-                              {stopGeofence ? (
-                                <div className="flex items-center gap-1 px-2 py-1 bg-cyan-50 border border-cyan-200 rounded-lg" title={`Active geofence: ${stopGeofence.radius_meters}m radius`}>
-                                  <Radar className="w-3.5 h-3.5 text-cyan-600" />
-                                  <span className="text-xs font-medium text-cyan-700">{stopGeofence.radius_meters}m</span>
-                                </div>
-                              ) : locGeo ? (
-                                <div className="flex items-center gap-1 px-2 py-1 bg-emerald-50 border border-emerald-200 rounded-lg" title={`Location geocoded: ${locGeo.radius}m radius`}>
-                                  <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                                  <span className="text-xs font-medium text-emerald-700">{locGeo.radius}m</span>
-                                </div>
-                              ) : null}
                             </div>
                           </div>
-                        );
-                      })}
+                      ))}
                     </div>
                   </div>
                 )}
@@ -877,10 +510,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                       Receiver(s) - Delivery Location(s)
                     </h3>
                     <div className="space-y-3">
-                      {deliveryStops.map((stop, index) => {
-                        const stopGeofence = geofences.find(g => g.stop_id === stop.id && g.status === 'active');
-                        const locGeo = locationGeofenceStatus[stop.id];
-                        return (
+                      {deliveryStops.map((stop, index) => (
                           <div key={stop.id} className="bg-white rounded-lg p-3 border border-emerald-100">
                             <div className="flex items-start gap-3">
                               <div className="w-6 h-6 rounded-full bg-emerald-500 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
@@ -897,22 +527,9 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
                                   <p className="text-xs text-slate-500 mt-1">Contact: {stop.contact_name} {stop.contact_phone && `- ${stop.contact_phone}`}</p>
                                 )}
                               </div>
-                              {/* Geofence indicator */}
-                              {stopGeofence ? (
-                                <div className="flex items-center gap-1 px-2 py-1 bg-cyan-50 border border-cyan-200 rounded-lg" title={`Active geofence: ${stopGeofence.radius_meters}m radius`}>
-                                  <Radar className="w-3.5 h-3.5 text-cyan-600" />
-                                  <span className="text-xs font-medium text-cyan-700">{stopGeofence.radius_meters}m</span>
-                                </div>
-                              ) : locGeo ? (
-                                <div className="flex items-center gap-1 px-2 py-1 bg-emerald-50 border border-emerald-200 rounded-lg" title={`Location geocoded: ${locGeo.radius}m radius`}>
-                                  <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                                  <span className="text-xs font-medium text-emerald-700">{locGeo.radius}m</span>
-                                </div>
-                              ) : null}
                             </div>
                           </div>
-                        );
-                      })}
+                      ))}
                     </div>
                   </div>
                 )}
@@ -952,225 +569,6 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
               </div>
             )}
 
-            {/* HERE Geofence Tracking Section */}
-            <div className="bg-gradient-to-br from-cyan-50 to-blue-50 rounded-xl p-5 border border-cyan-200">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <Radar className="w-5 h-5 text-cyan-600" />
-                  <span className="font-semibold text-slate-700">HERE Geofence Tracking</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {activeGeofences.length > 0 ? (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
-                      <Wifi className="w-3 h-3" />
-                      Active ({activeGeofences.length})
-                    </span>
-                  ) : allStopsGeocoded && totalStopCount > 0 ? (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
-                      <CheckCircle className="w-3 h-3" />
-                      Locations Ready
-                    </span>
-                  ) : totalStopCount > 0 ? (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
-                      <AlertTriangle className="w-3 h-3" />
-                      {geocodedStopCount}/{totalStopCount} Geocoded
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-600">
-                      <WifiOff className="w-3 h-3" />
-                      No Stops
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {activeGeofences.length > 0 ? (
-                <div className="space-y-3">
-                  {/* Geofence List */}
-                  <div className="grid gap-2">
-                    {activeGeofences.map((gf) => (
-                      <div key={gf.id} className="flex items-center gap-3 p-2.5 bg-white rounded-lg border border-cyan-100">
-                        <div className="w-8 h-8 rounded-full bg-cyan-100 flex items-center justify-center flex-shrink-0">
-                          <Radar className="w-4 h-4 text-cyan-600" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-slate-700 truncate">{gf.geofence_name}</p>
-                          <p className="text-xs text-slate-500">
-                            {gf.center_lat?.toFixed(4)}, {gf.center_lng?.toFixed(4)} | {gf.radius_meters}m radius
-                          </p>
-                        </div>
-                        <ShieldCheck className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Webhook Events */}
-                  {webhookEvents.length > 0 && (
-                    <div className="mt-3">
-                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1">
-                        <Activity className="w-3 h-3" />
-                        Recent Webhook Events
-                      </p>
-                      <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                        {webhookEvents.slice(0, 10).map((evt) => (
-                          <div key={evt.id} className="flex items-center gap-2 text-xs p-2 bg-white/80 rounded border border-slate-100">
-                            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                              evt.event_type === 'INSIDE' || evt.event_type === 'INSIDE_GEOFENCE' 
-                                ? 'bg-emerald-500' 
-                                : evt.event_type === 'OUTSIDE' || evt.event_type === 'OUTSIDE_GEOFENCE'
-                                ? 'bg-amber-500'
-                                : 'bg-slate-400'
-                            }`} />
-                            <span className="font-medium text-slate-700">{evt.event_type}</span>
-                            <span className="text-slate-400 ml-auto">
-                              {new Date(evt.event_timestamp).toLocaleString('en-US', {
-                                month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true
-                              })}
-                            </span>
-                            {evt.processed && <ShieldCheck className="w-3 h-3 text-emerald-500" />}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="mt-2 p-2.5 bg-blue-50 rounded-lg border border-blue-100">
-                    <p className="text-xs text-blue-700 flex items-start gap-2">
-                      <ShieldCheck className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
-                      <span>
-                        HERE Tracking webhook is configured. Geofence events are automatically recorded when the driver's device enters or exits monitored areas. Timestamps are GPS-verified for invoice accuracy.
-                      </span>
-                    </p>
-                  </div>
-                </div>
-              ) : allStopsGeocoded && totalStopCount > 0 ? (
-                /* All locations are geocoded - geofences are ready */
-                <div className="space-y-3">
-                  <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-200">
-                    <div className="flex items-start gap-3">
-                      <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-sm font-medium text-emerald-800">All locations are geocoded and geofence-ready</p>
-                        <p className="text-xs text-emerald-600 mt-1">
-                          All {totalStopCount} stop location(s) have GPS coordinates. Geofences will be automatically activated when a driver is assigned, or you can activate them now.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Show geocoded locations */}
-                  <div className="grid gap-2">
-                    {stops.map((stop) => {
-                      const locGeo = locationGeofenceStatus[stop.id];
-                      if (!locGeo) return null;
-                      return (
-                        <div key={stop.id} className="flex items-center gap-3 p-2.5 bg-white rounded-lg border border-emerald-100">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                            stop.stop_type === 'pickup' ? 'bg-blue-100' : 'bg-emerald-100'
-                          }`}>
-                            {stop.stop_type === 'pickup' ? (
-                              <Truck className="w-4 h-4 text-blue-600" />
-                            ) : (
-                              <Package className="w-4 h-4 text-emerald-600" />
-                            )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-slate-700 truncate">
-                              {stop.stop_type === 'pickup' ? 'Pickup' : 'Delivery'} - {stop.company_name || stop.city}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              {locGeo.lat.toFixed(4)}, {locGeo.lng.toFixed(4)} | {locGeo.radius}m radius
-                            </p>
-                          </div>
-                          <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Activate button - only if no active geofences yet */}
-                  <button
-                    onClick={handleSetupGeofences}
-                    disabled={settingUpGeofences}
-                    className="w-full px-4 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl font-medium hover:from-cyan-700 hover:to-blue-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2 text-sm"
-                  >
-                    {settingUpGeofences ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Activating Geofences...
-                      </>
-                    ) : (
-                      <>
-                        <Radar className="w-4 h-4" />
-                        Activate Geofences Now
-                      </>
-                    )}
-                  </button>
-
-                  {geofenceSetupResult && (
-                    <p className={`text-sm font-medium text-center ${
-                      geofenceSetupResult.includes('Failed') || geofenceSetupResult.includes('Error')
-                        ? 'text-red-600'
-                        : 'text-emerald-600'
-                    }`}>
-                      {geofenceSetupResult}
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div className="text-center py-4">
-                  {stops.length === 0 ? (
-                    <>
-                      <p className="text-sm text-slate-600 mb-3">
-                        To set up geofence tracking, you need to first configure pickup and delivery stops for this load.
-                      </p>
-                      <p className="text-xs text-amber-600 mb-4 flex items-center justify-center gap-1">
-                        <AlertTriangle className="w-3.5 h-3.5" />
-                        Click "Edit Load" below to add shipper/receiver addresses.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-sm text-slate-600 mb-2">
-                        {geocodedStopCount > 0 
-                          ? `${geocodedStopCount} of ${totalStopCount} stop locations are geocoded.`
-                          : 'Stop locations need to be geocoded for geofencing.'
-                        }
-                      </p>
-                      <p className="text-xs text-slate-500 mb-4">
-                        Go to <strong>Locations</strong> to geocode your shippers/receivers, or click below to geocode and activate geofences for this load.
-                      </p>
-                      <button
-                        onClick={handleSetupGeofences}
-                        disabled={settingUpGeofences}
-                        className="px-6 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl font-medium hover:from-cyan-700 hover:to-blue-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2 mx-auto"
-                      >
-                        {settingUpGeofences ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            Setting Up Geofences...
-                          </>
-                        ) : (
-                          <>
-                            <Radar className="w-4 h-4" />
-                            Geocode & Setup Geofences
-                          </>
-                        )}
-                      </button>
-                    </>
-                  )}
-                  {geofenceSetupResult && (
-                    <p className={`mt-3 text-sm font-medium ${
-                      geofenceSetupResult.includes('Failed') || geofenceSetupResult.includes('Error') || geofenceSetupResult.includes('not found')
-                        ? 'text-red-600'
-                        : 'text-emerald-600'
-                    }`}>
-                      {geofenceSetupResult}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
 
 
             {/* Details Grid */}

@@ -355,14 +355,6 @@ const AppLayout: React.FC = () => {
       await supabase.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
     }
 
-    try {
-      await supabase.functions.invoke('here-webhook', {
-        body: { action: 'deactivate-load-geofences', load_id: load.id },
-      });
-    } catch (err) {
-      console.warn('Geofence deactivation failed (non-critical):', err);
-    }
-
     fetchData();
   };
   const handleGenerateInvoice = async (load: Load) => {

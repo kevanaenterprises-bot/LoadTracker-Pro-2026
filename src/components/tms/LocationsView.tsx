@@ -96,40 +96,7 @@ const LocationsView: React.FC<LocationsViewProps> = ({ onBack, defaultTab = 'shi
 
   // Geocode a single location by ID
   const geocodeLocation = async (locationId: string, address: string, city: string, state: string, zip: string, geofenceRadius?: number) => {
-    setGeocodingIds(prev => new Set(prev).add(locationId));
-    try {
-      const { data, error } = await supabase.functions.invoke('here-webhook', {
-        body: {
-          action: 'geocode-and-save-location',
-          location_id: locationId,
-          address,
-          city,
-          state,
-          zip,
-          geofence_radius: geofenceRadius || 500,
-        },
-      });
-
-      if (data?.success) {
-        // Update local state with new coordinates
-        setLocations(prev => prev.map(loc => 
-          loc.id === locationId 
-            ? { ...loc, latitude: data.latitude, longitude: data.longitude, geofence_radius: data.geofence_radius }
-            : loc
-        ));
-        console.log(`Geocoded location ${locationId}: ${data.latitude}, ${data.longitude}`);
-      } else {
-        console.warn(`Failed to geocode location ${locationId}:`, data?.error || error);
-      }
-    } catch (err) {
-      console.warn(`Geocoding error for ${locationId}:`, err);
-    } finally {
-      setGeocodingIds(prev => {
-        const next = new Set(prev);
-        next.delete(locationId);
-        return next;
-      });
-    }
+    alert('Auto-geocoding requires Google Maps configuration. Please enter coordinates manually.');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

@@ -274,27 +274,7 @@ const EditLoadModal: React.FC<EditLoadModalProps> = ({ isOpen, load, onClose, on
       // First save the current stops so geofences can be created
       await saveStops();
 
-      const { data, error } = await supabase.functions.invoke('here-webhook', {
-        body: {
-          action: 'setup-load-geofences',
-          load_id: load.id,
-        },
-      });
-
-      if (error) {
-        setTrackingResult({ success: false, message: `Error: ${error.message}` });
-      } else if (data?.success) {
-        setTrackingResult({ 
-          success: true, 
-          message: `Tracking initiated! ${data.geofences_created} geofence(s) created.` 
-        });
-        // Update miles if calculated
-        if (data.total_miles) {
-          setFormData(prev => ({ ...prev, total_miles: data.total_miles.toString() }));
-        }
-      } else {
-        setTrackingResult({ success: false, message: data?.error || 'Failed to initiate tracking' });
-      }
+      setTrackingResult({ success: false, message: 'Geofence tracking requires Google Maps configuration.' });
     } catch (err: any) {
       setTrackingResult({ success: false, message: err.message || 'Failed to initiate tracking' });
     } finally {
@@ -310,18 +290,7 @@ const EditLoadModal: React.FC<EditLoadModalProps> = ({ isOpen, load, onClose, on
       // Save stops first
       await saveStops();
 
-      const { data, error } = await supabase.functions.invoke('here-webhook', {
-        body: {
-          action: 'calculate-route',
-          load_id: load.id,
-        },
-      });
-
-      if (data?.success && data.total_miles) {
-        setFormData(prev => ({ ...prev, total_miles: data.total_miles.toString() }));
-      } else {
-        alert(data?.error || 'Could not calculate miles. Make sure addresses are filled in.');
-      }
+      alert('Auto-calculate miles requires Google Maps configuration. Please enter miles manually.');
     } catch (err: any) {
       alert('Failed to calculate miles: ' + (err.message || 'Unknown error'));
     } finally {
@@ -445,23 +414,6 @@ const EditLoadModal: React.FC<EditLoadModalProps> = ({ isOpen, load, onClose, on
       if (loadError) throw loadError;
       await saveStops();
 
-      // Always auto-setup geofences after saving stops (fire-and-forget)
-      // This ensures geofences are created/updated whenever stops change
-      supabase.functions.invoke('here-webhook', {
-        body: {
-          action: 'auto-setup-geofences',
-          load_id: load.id,
-        },
-      }).then(({ data: geoData }) => {
-        if (geoData?.success) {
-          console.log(`Auto-geofences: ${geoData.geofences_created} created for load ${formData.load_number}`);
-        } else {
-          console.warn('Auto-geofence setup:', geoData?.error || 'unknown error');
-        }
-      }).catch((geoErr) => {
-        console.warn('Auto-geofence setup failed (non-critical):', geoErr);
-      });
-
       // If a NEW driver was assigned, send them the dispatch SMS (fire-and-forget, don't block save)
       if (newDriverId && newDriverId !== oldDriverId) {
         const newDriver = drivers.find(d => d.id === newDriverId);
@@ -496,16 +448,6 @@ const EditLoadModal: React.FC<EditLoadModalProps> = ({ isOpen, load, onClose, on
             console.warn('SMS sending error (non-critical):', smsErr);
           });
 
-          // Fire-and-forget device registration
-          supabase.functions.invoke('here-webhook', {
-            body: {
-              action: 'register-device',
-              driver_id: newDriverId,
-              device_name: `${newDriver.name}'s Device`,
-            },
-          }).catch((devErr) => {
-            console.warn('Device registration failed (non-critical):', devErr);
-          });
         } else {
           console.warn('Could not send SMS: driver phone or acceptance token missing', {
             driverFound: !!newDriver,

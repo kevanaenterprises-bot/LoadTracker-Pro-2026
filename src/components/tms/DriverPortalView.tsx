@@ -247,11 +247,6 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
       if (load.driver_id) {
         await supabase.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
       }
-      try {
-        await supabase.functions.invoke('here-webhook', {
-          body: { action: 'deactivate-load-geofences', load_id: load.id },
-        });
-      } catch { /* non-critical */ }
       if (gpsTracking) stopGpsTracking();
       alert('Load has been returned to dispatch. You can close this page.');
       setLoad({ ...load, status: 'UNASSIGNED', driver_id: null });
@@ -346,32 +341,6 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
 
       // Reset status indicator after 3 seconds
       setTimeout(() => setDbWriteStatus('idle'), 3000);
-
-      // ============================================================
-      // SECONDARY: Also call edge function for side effects
-      // (geofence checks, position history logging, etc.)
-      // This is non-blocking - we don't await it or care if it fails
-      // ============================================================
-      supabase.functions.invoke('here-webhook', {
-        body: {
-          action: 'update-driver-location',
-          driver_id: load.driver_id,
-          latitude: lat,
-          longitude: lng,
-          accuracy: accuracy,
-          speed: speedMph,
-          heading: heading,
-          altitude: altitude,
-          battery_level: batteryLevel,
-        },
-      }).then(({ data }) => {
-        if (data?.success) {
-          log(`Edge function also confirmed (secondary)`);
-        }
-      }).catch(() => {
-        // Edge function failure is non-critical since we wrote directly to DB
-        log(`Edge function call failed (non-critical, DB write was primary)`);
-      });
 
       setLastGpsUpdate(new Date());
       setGpsUpdateCount(prev => prev + 1);
@@ -847,12 +816,6 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
       if (load.driver_id) {
         await supabase.from('drivers').update({ status: 'available' }).eq('id', load.driver_id);
       }
-
-      try {
-        await supabase.functions.invoke('here-webhook', {
-          body: { action: 'deactivate-load-geofences', load_id: load.id },
-        });
-      } catch { /* non-critical */ }
 
       if (gpsTracking) stopGpsTracking();
       setLoad({ ...load, status: finalStatus as any, bol_number: bolNumber.trim().toUpperCase() });

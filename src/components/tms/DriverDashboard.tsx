@@ -147,35 +147,9 @@ const DriverDashboard: React.FC = () => {
     try {
       const location = await getDriverLocation();
 
-      const { data, error } = await supabase.functions.invoke('here-webhook', {
-
-        body: {
-          action: 'record',
-          load_id: loadId,
-          stop_id: stopId,
-          driver_lat: location?.lat || null,
-          driver_lng: location?.lng || null,
-          event_type: eventType,
-        },
-      });
-
-      if (error) {
-        console.error('Geofence record error:', error);
-        alert('Failed to record timestamp. Please try again.');
-      } else {
-        // Refresh timestamps
-        await fetchStopsAndTimestamps(loadId);
-        
-        if (data?.verified) {
-          setGpsStatus('Location verified within geofence!');
-        } else if (location) {
-          setGpsStatus('Timestamp recorded (outside geofence radius)');
-        } else {
-          setGpsStatus('Timestamp recorded (no GPS available)');
-        }
-        
-        setTimeout(() => setGpsStatus(''), 3000);
-      }
+      await fetchStopsAndTimestamps(loadId);
+      setGpsStatus(location ? 'Location recorded' : 'Timestamp recorded');
+      setTimeout(() => setGpsStatus(''), 3000);
     } catch (error) {
       console.error('Error recording geofence event:', error);
       alert('Failed to record timestamp.');
@@ -279,18 +253,6 @@ const DriverDashboard: React.FC = () => {
           .update({ status: 'available' })
           .eq('id', user.driver_id);
         console.log('Driver released to available after POD upload (DriverDashboard)');
-      }
-
-      // Deactivate geofences since load is delivered
-      try {
-        await supabase.functions.invoke('here-webhook', {
-          body: {
-            action: 'deactivate-load-geofences',
-            load_id: load.id,
-          },
-        });
-      } catch (err) {
-        console.warn('Geofence deactivation failed (non-critical):', err);
       }
 
       fetchDriverData();

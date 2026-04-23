@@ -422,19 +422,6 @@ const CreateLoadModal: React.FC<CreateLoadModalProps> = ({ isOpen, onClose, onLo
 
     await supabase.from('load_stops').insert(stopsToInsert);
 
-    // Auto-setup geofences (fire-and-forget)
-    if (loadData?.id) {
-      supabase.functions.invoke('here-webhook', {
-        body: { action: 'auto-setup-geofences', load_id: loadData.id },
-      }).then(({ data: geoData }) => {
-        if (geoData?.success) {
-          console.log(`Auto-geofences: ${geoData.geofences_created} created for load ${payload.load_number}`);
-        }
-      }).catch((err) => {
-        console.warn('Auto-geofence setup failed (non-critical):', err);
-      });
-    }
-
     return loadData;
   };
 

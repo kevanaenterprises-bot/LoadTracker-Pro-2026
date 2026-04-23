@@ -259,7 +259,7 @@ const IFTAReportView: React.FC<Props> = ({ onBack }) => {
         const gpsData = gpsTrackedMiles[load.id];
         
         if (gpsData && gpsData.length > 0) {
-          // USE GPS-TRACKED STATE MILES - these are actual miles from HERE Maps tracking
+          // USE GPS-TRACKED STATE MILES - these are actual miles from GPS tracking
           const gpsTotalMiles = gpsData.reduce((sum, g) => sum + g.miles, 0);
           
           gpsData.forEach(g => {

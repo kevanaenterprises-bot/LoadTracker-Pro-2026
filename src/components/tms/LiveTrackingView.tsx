@@ -37,7 +37,6 @@ interface DriverLocation {
   } | null;
   geofences: Array<{
     id: string;
-    here_geofence_id: string;
     geofence_name: string;
     center_lat: number;
     center_lng: number;
