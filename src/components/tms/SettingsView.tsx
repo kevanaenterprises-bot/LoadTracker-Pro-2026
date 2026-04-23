@@ -172,7 +172,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     setTestEmailResult(null);
 
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'https://loadtracker-pro-2026-production.up.railway.app';
+      const apiUrl = import.meta.env.VITE_API_URL || 'https://467hj16j.up.railway.app';
       const emailResponse = await fetch(`${apiUrl}/api/send-invoice-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -202,7 +202,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     setDiagnosing(true);
     setDiagResult(null);
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'https://loadtracker-pro-2026-production.up.railway.app';
+      const apiUrl = import.meta.env.VITE_API_URL || 'https://467hj16j.up.railway.app';
       const diagResponse = await fetch(`${apiUrl}/api/health`);
       const data = await diagResponse.json();
       if (!diagResponse.ok) {
@@ -642,7 +642,7 @@ CREATE INDEX IF NOT EXISTS idx_loads_customer_id ON loads(customer_id);`;
 
 
         {/* ═══════════════════════════════════════════════════════════════ */}
-        {/* EMAIL DELIVERY: Resend API (Primary & Only Method)             */}
+        {/* EMAIL DELIVERY: Outlook SMTP (Primary & Only Method)             */}
         {/* ═══════════════════════════════════════════════════════════════ */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
           <div className="px-6 py-4 bg-gradient-to-r from-blue-700 to-blue-500">
@@ -652,7 +652,7 @@ CREATE INDEX IF NOT EXISTS idx_loads_customer_id ON loads(customer_id);`;
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-white">Email Delivery</h3>
-                <p className="text-blue-200 text-sm">Invoice emails sent via Resend API from kevin@go4fc.com</p>
+                <p className="text-blue-200 text-sm">Invoice emails sent via Outlook SMTP from kevin@go4fc.com</p>
               </div>
             </div>
           </div>
@@ -750,7 +750,7 @@ CREATE INDEX IF NOT EXISTS idx_loads_customer_id ON loads(customer_id);`;
                 Send Test Email
               </h4>
               <p className="text-sm text-slate-500 mb-3">
-                Send a test email to verify your Resend API configuration is working correctly.
+                Send a test email to verify your Outlook SMTP configuration is working correctly.
               </p>
               <div className="flex gap-3">
                 <div className="flex-1 relative">
@@ -782,9 +782,9 @@ CREATE INDEX IF NOT EXISTS idx_loads_customer_id ON loads(customer_id);`;
                     <p className="text-sm">{testEmailResult.message}</p>
                     {!testEmailResult.success && testEmailResult.message.toLowerCase().includes('api key') && (
                       <div className="mt-3 p-3 bg-red-100 border border-red-300 rounded-lg">
-                        <p className="text-xs font-bold text-red-800 mb-1">Resend API Key Issue</p>
+                        <p className="text-xs font-bold text-red-800 mb-1">Outlook SMTP Issue</p>
                         <p className="text-xs text-red-700">
-                          Your Resend API key may be invalid or expired. 
+                          Your Outlook credentials may be incorrect. 
                           Get a new key at <a href="https://resend.com/api-keys" target="_blank" rel="noopener" className="underline font-semibold">resend.com/api-keys</a> and 
                           update the <code className="bg-red-200 px-1 rounded font-mono">RESEND_API_KEY</code> secret in your Supabase Edge Function settings.
                         </p>
@@ -803,7 +803,7 @@ CREATE INDEX IF NOT EXISTS idx_loads_customer_id ON loads(customer_id);`;
                 Diagnose Email Configuration
               </h4>
               <p className="text-sm text-slate-500 mb-3">
-                Tests the Resend API connection and reports whether email delivery is working. Use this to troubleshoot failed invoice emails.
+                Tests the Outlook SMTP connection and reports whether email delivery is working. Use this to troubleshoot failed invoice emails.
               </p>
               <button
                 onClick={handleDiagnoseEmail}
@@ -918,7 +918,7 @@ CREATE INDEX IF NOT EXISTS idx_loads_customer_id ON loads(customer_id);`;
                         <div className="mt-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
                           <h6 className="font-bold text-amber-800 mb-1 flex items-center gap-2">
                             <AlertTriangle className="w-4 h-4" />
-                            Resend API Key Invalid
+                            Outlook SMTP Error
                           </h6>
                           <p className="text-xs text-amber-700">
                             Your Resend API key is expired or invalid. 
@@ -935,7 +935,7 @@ CREATE INDEX IF NOT EXISTS idx_loads_customer_id ON loads(customer_id);`;
                       <div className="flex items-center gap-3">
                         <CheckCircle className="w-6 h-6 text-emerald-600" />
                         <div>
-                          <p className="font-bold text-emerald-800">Resend API is working!</p>
+                          <p className="font-bold text-emerald-800">Outlook SMTP is working!</p>
                           <p className="text-sm text-emerald-700 mt-1">
                             Try sending a test email above to confirm end-to-end delivery.
                           </p>
@@ -1020,7 +1020,7 @@ CREATE INDEX IF NOT EXISTS idx_loads_customer_id ON loads(customer_id);`;
                     </ol>
                     <div className="mt-3 flex items-center gap-2 text-xs text-emerald-600 font-medium">
                       <Send className="w-3.5 h-3.5" />
-                      <span>POD Upload → Invoice Generated → Email Sent via Resend API</span>
+                      <span>POD Upload → Invoice Generated → Email Sent via Outlook SMTP</span>
                     </div>
                   </div>
                 </div>

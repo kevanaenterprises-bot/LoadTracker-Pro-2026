@@ -397,7 +397,7 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
 
       setPdfProgress('Sending email...');
 
-      const apiUrl = import.meta.env.VITE_API_URL || 'https://loadtracker-pro-2026-production.up.railway.app';
+      const apiUrl = import.meta.env.VITE_API_URL || 'https://467hj16j.up.railway.app';
       const emailResponse = await fetch(`${apiUrl}/api/send-invoice-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

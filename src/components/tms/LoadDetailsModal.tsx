@@ -622,7 +622,7 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
     setShowEmailConfirmModal(false);
 
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'https://loadtracker-pro-2026-production.up.railway.app';
+      const apiUrl = import.meta.env.VITE_API_URL || 'https://467hj16j.up.railway.app';
       
       // Parse additional CC emails if provided
       const ccList = additionalCcEmails
