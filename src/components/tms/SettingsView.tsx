@@ -173,11 +173,15 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
 
     try {
       const apiUrl = import.meta.env.VITE_API_URL || 'https://loadtracker-pro-2026-production.up.railway.app';
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 20000);
       const emailResponse = await fetch(`${apiUrl}/api/send-invoice-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ load_id: '__test__', test_email: testEmailAddress }),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
       const data = await emailResponse.json();
 
       if (!emailResponse.ok) {
@@ -188,10 +192,10 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
         setTestEmailResult({ success: false, message: data?.error || data?.message || 'Test failed' });
       }
     } catch (err: any) {
-      setTestEmailResult({ 
-        success: false, 
-        message: `Request failed: ${err.message || 'Unknown error'}. Try clicking "Run Diagnostics" below for detailed analysis.` 
-      });
+      const msg = err?.name === 'AbortError'
+        ? 'Request timed out (20s). Check Railway logs — SMTP may be failing silently.'
+        : `Request failed: ${err.message || 'Unknown error'}`;
+      setTestEmailResult({ success: false, message: msg });
     } finally {
       setSendingTestEmail(false);
     }
