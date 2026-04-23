@@ -2,10 +2,9 @@ const nodemailer = require('nodemailer');
 
 async function sendInvoiceEmail({ to, cc, subject, text, attachments }) {
   const transporter = nodemailer.createTransport({
-    host: 'smtp.office365.com',
+    host: 'smtp.gmail.com',
     port: 587,
     secure: false,
-    family: 4,
     auth: {
       user: process.env.OUTLOOK_USER,
       pass: process.env.OUTLOOK_PASS
