@@ -5,6 +5,7 @@ async function sendInvoiceEmail({ to, cc, subject, text, attachments }) {
     host: 'smtp.office365.com',
     port: 587,
     secure: false,
+    family: 4,
     auth: {
       user: process.env.OUTLOOK_USER,
       pass: process.env.OUTLOOK_PASS
