@@ -94,9 +94,33 @@ const LocationsView: React.FC<LocationsViewProps> = ({ onBack, defaultTab = 'shi
     setModalOpen(true);
   };
 
-  // Geocode a single location by ID
+  // Geocode a single location by ID using Google Maps Geocoding API
   const geocodeLocation = async (locationId: string, address: string, city: string, state: string, zip: string, geofenceRadius?: number) => {
-    alert('Auto-geocoding requires Google Maps configuration. Please enter coordinates manually.');
+    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+    if (!apiKey) return;
+    setGeocodingIds(prev => new Set(prev).add(locationId));
+    try {
+      const query = encodeURIComponent(`${address}, ${city}, ${state} ${zip}`);
+      const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${query}&key=${apiKey}`);
+      const data = await res.json();
+      if (data.status === 'OK' && data.results[0]) {
+        const { lat, lng } = data.results[0].geometry.location;
+        await supabase.from('locations').update({
+          latitude: lat,
+          longitude: lng,
+          geofence_radius: geofenceRadius || 500,
+        }).eq('id', locationId);
+        setLocations(prev => prev.map(loc =>
+          loc.id === locationId ? { ...loc, latitude: lat, longitude: lng } : loc
+        ));
+      } else {
+        console.warn('Geocoding failed:', data.status, data.error_message);
+      }
+    } catch (err) {
+      console.warn('Geocoding error:', err);
+    } finally {
+      setGeocodingIds(prev => { const next = new Set(prev); next.delete(locationId); return next; });
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

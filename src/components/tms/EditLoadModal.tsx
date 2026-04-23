@@ -285,12 +285,33 @@ const EditLoadModal: React.FC<EditLoadModalProps> = ({ isOpen, load, onClose, on
   const handleCalculateMiles = async () => {
     if (!load) return;
     setCalculatingMiles(true);
-
     try {
-      // Save stops first
       await saveStops();
 
-      alert('Auto-calculate miles requires Google Maps configuration. Please enter miles manually.');
+      const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+      if (!apiKey) { alert('Google Maps API key not configured.'); return; }
+
+      const allStops = [...pickupStops, ...deliveryStops];
+      if (allStops.length < 2) { alert('Add at least one pickup and one delivery stop to calculate miles.'); return; }
+
+      const addresses = allStops.map(s => encodeURIComponent(`${s.address}, ${s.city}, ${s.state} ${s.zip}`));
+      const origin = addresses[0];
+      const destination = addresses[addresses.length - 1];
+      const waypoints = addresses.slice(1, -1).map(a => `via:${a}`).join('|');
+      const waypointsParam = waypoints ? `&waypoints=${waypoints}` : '';
+
+      const res = await fetch(
+        `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}${waypointsParam}&key=${apiKey}`
+      );
+      const data = await res.json();
+
+      if (data.status === 'OK' && data.routes[0]) {
+        const totalMeters = data.routes[0].legs.reduce((sum: number, leg: any) => sum + leg.distance.value, 0);
+        const totalMiles = Math.round((totalMeters / 1609.344) * 10) / 10;
+        setFormData(prev => ({ ...prev, total_miles: totalMiles.toString() }));
+      } else {
+        alert('Could not calculate route. Check that all addresses are valid.');
+      }
     } catch (err: any) {
       alert('Failed to calculate miles: ' + (err.message || 'Unknown error'));
     } finally {
