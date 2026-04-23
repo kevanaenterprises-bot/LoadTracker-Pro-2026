@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { generateNextInvoiceNumber } from '@/lib/invoiceUtils';
 
@@ -24,6 +24,9 @@ const DriverDashboard: React.FC = () => {
   const [timestamps, setTimestamps] = useState<GeofenceTimestamp[]>([]);
   const [recordingEvent, setRecordingEvent] = useState<string | null>(null);
   const [gpsStatus, setGpsStatus] = useState<string>('');
+  const watchIdRef = useRef<number | null>(null);
+  const autoTriggeredRef = useRef<Set<string>>(new Set());
+  const stopsRef = useRef<LoadStop[]>([]);
 
   useEffect(() => {
     if (user?.driver_id) {
@@ -38,6 +41,19 @@ const DriverDashboard: React.FC = () => {
       fetchStopsAndTimestamps(selectedLoad.id);
     }
   }, [selectedLoad]);
+
+  // Start auto-geofencing when load is IN_TRANSIT and stops are loaded
+  useEffect(() => {
+    if (selectedLoad?.status === 'IN_TRANSIT' && stops.length > 0) {
+      startAutoGeofencing(selectedLoad.id);
+    }
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+    };
+  }, [selectedLoad?.id, selectedLoad?.status, stops.length]);
 
   const fetchDriverData = async () => {
     if (!user?.driver_id) return;
@@ -80,14 +96,16 @@ const DriverDashboard: React.FC = () => {
   };
 
   const fetchStopsAndTimestamps = async (loadId: string) => {
-    // Fetch stops
     const { data: loadStops } = await supabase
       .from('load_stops')
-      .select('*')
+      .select('*, location:locations(latitude, longitude, geofence_radius)')
       .eq('load_id', loadId)
       .order('stop_type')
       .order('stop_sequence');
-    if (loadStops) setStops(loadStops);
+    if (loadStops) {
+      setStops(loadStops as LoadStop[]);
+      stopsRef.current = loadStops as LoadStop[];
+    }
 
     // Fetch timestamps
     const { data: geoData } = await supabase
@@ -135,6 +153,42 @@ const DriverDashboard: React.FC = () => {
     });
   };
 
+  // Haversine distance in meters
+  const getDistanceMeters = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+    const R = 6371000;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+
+  const saveGeofenceTimestamp = async (
+    loadId: string, stopId: string | null, stopType: string,
+    eventType: 'arrived' | 'departed', lat: number | null, lng: number | null,
+    method: string
+  ) => {
+    // Guard: don't double-insert
+    const query = supabase.from('geofence_timestamps').select('id')
+      .eq('load_id', loadId).eq('event_type', eventType);
+    if (stopId) query.eq('stop_id', stopId);
+    else query.eq('stop_type', stopType).is('stop_id', null);
+    const { data: existing } = await query.maybeSingle();
+    if (existing) return false;
+
+    await supabase.from('geofence_timestamps').insert({
+      load_id: loadId,
+      stop_id: stopId,
+      stop_type: stopType,
+      event_type: eventType,
+      timestamp: new Date().toISOString(),
+      latitude: lat,
+      longitude: lng,
+      verified: lat !== null,
+      verification_method: method,
+    });
+    return true;
+  };
+
   const handleRecordGeofenceEvent = async (
     loadId: string,
     stopId: string | null,
@@ -143,10 +197,10 @@ const DriverDashboard: React.FC = () => {
   ) => {
     const eventKey = `${stopId || stopType}-${eventType}`;
     setRecordingEvent(eventKey);
-
     try {
       const location = await getDriverLocation();
-
+      await saveGeofenceTimestamp(loadId, stopId, stopType, eventType,
+        location?.lat ?? null, location?.lng ?? null, location ? 'gps_manual' : 'manual');
       await fetchStopsAndTimestamps(loadId);
       setGpsStatus(location ? 'Location recorded' : 'Timestamp recorded');
       setTimeout(() => setGpsStatus(''), 3000);
@@ -156,6 +210,51 @@ const DriverDashboard: React.FC = () => {
     } finally {
       setRecordingEvent(null);
     }
+  };
+
+  // Start GPS watchPosition auto-geofencing for the active load
+  const startAutoGeofencing = (loadId: string) => {
+    if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+    autoTriggeredRef.current = new Set();
+    if (!navigator.geolocation) return;
+
+    const insideSet = new Set<string>();
+
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      async (pos) => {
+        const { latitude: dLat, longitude: dLng } = pos.coords;
+        for (const stop of stopsRef.current) {
+          const sLat = stop.location?.latitude;
+          const sLng = stop.location?.longitude;
+          const radius = stop.location?.geofence_radius || 500;
+          if (!sLat || !sLng) continue;
+
+          const dist = getDistanceMeters(dLat, dLng, sLat, sLng);
+          const inside = dist <= radius;
+          const wasInside = insideSet.has(stop.id);
+
+          if (inside && !wasInside) {
+            insideSet.add(stop.id);
+            const key = `${stop.id}-arrived`;
+            if (!autoTriggeredRef.current.has(key)) {
+              autoTriggeredRef.current.add(key);
+              const saved = await saveGeofenceTimestamp(loadId, stop.id, stop.stop_type, 'arrived', dLat, dLng, 'gps_geofence');
+              if (saved) fetchStopsAndTimestamps(loadId);
+            }
+          } else if (!inside && wasInside) {
+            insideSet.delete(stop.id);
+            const key = `${stop.id}-departed`;
+            if (!autoTriggeredRef.current.has(key)) {
+              autoTriggeredRef.current.add(key);
+              const saved = await saveGeofenceTimestamp(loadId, stop.id, stop.stop_type, 'departed', dLat, dLng, 'gps_geofence');
+              if (saved) fetchStopsAndTimestamps(loadId);
+            }
+          }
+        }
+      },
+      (err) => console.warn('Geofence watch error:', err),
+      { enableHighAccuracy: true, maximumAge: 30000, timeout: 30000 }
+    );
   };
 
   const getTimestamp = (stopId: string | null, stopType: string, eventType: string): GeofenceTimestamp | undefined => {
@@ -244,6 +343,11 @@ const DriverDashboard: React.FC = () => {
         .from('loads')
         .update({ status: 'INVOICED' })
         .eq('id', load.id);
+
+      // Record departed timestamp for delivery stops that don't have one yet (POD = proof of departure)
+      for (const stop of stopsRef.current.filter(s => s.stop_type === 'delivery')) {
+        await saveGeofenceTimestamp(load.id, stop.id, 'delivery', 'departed', null, null, 'pod_upload');
+      }
 
       // Release the driver back to available after POD upload
       // Driver should be freed up once delivery is confirmed, not waiting for payment
