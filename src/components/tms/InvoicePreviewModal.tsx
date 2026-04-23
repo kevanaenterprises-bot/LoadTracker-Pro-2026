@@ -397,32 +397,20 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
 
       setPdfProgress('Sending email...');
 
-      // pods_combined: true → edge function attaches only this single file
-      const { data, error } = await supabase.functions.invoke('send-invoice-email', {
-        body: {
+      const apiUrl = import.meta.env.VITE_API_URL || 'https://loadtracker-pro-2026-production.up.railway.app';
+      const emailResponse = await fetch(`${apiUrl}/api/send-invoice-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           load_id: load.id,
-          invoice_pdf_base64: base64,
-          invoice_pdf_filename: pdfFilename,
-          pods_combined: true,
-          additional_emails: additionalEmails.length > 0 ? additionalEmails : undefined,
-        },
+          pdfBase64: base64,
+          additional_cc: additionalEmails.length > 0 ? additionalEmails : undefined,
+        }),
       });
+      const data = await emailResponse.json();
 
-      if (error) {
-        let detailedError = 'Failed to send email';
-        try {
-          if (error.context && typeof error.context.json === 'function') {
-            const errBody = await error.context.json();
-            detailedError = errBody?.error || errBody?.message || error.message || detailedError;
-          } else if (error.message) {
-            detailedError = error.message;
-          }
-        } catch {
-          detailedError = error.message || detailedError;
-        }
-        if (detailedError.includes('Failed to send a request')) {
-          detailedError = 'Could not reach the email server. Please try again in a moment.';
-        }
+      if (!emailResponse.ok) {
+        const detailedError = data?.error || data?.message || 'Failed to send email';
         setEmailResult({ success: false, message: detailedError });
         setPdfProgress('');
       } else if (data?.success) {
@@ -439,9 +427,6 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
           console.warn('[Invoice Email] Failed to update emailed_at (non-critical):', dbErr);
         }
         let successMsg = data.message || `Invoice emailed to ${emailedTo}`;
-        if (data.resend_id) {
-          successMsg += ` [ID: ${data.resend_id.substring(0, 8)}...]`;
-        }
         setEmailResult({ success: true, message: successMsg });
         setPdfProgress('Email sent successfully!');
         setTimeout(() => setPdfProgress(''), 3000);

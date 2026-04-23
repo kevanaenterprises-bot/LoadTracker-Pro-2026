@@ -103,12 +103,16 @@ const EmailDeliveryLogView: React.FC<EmailDeliveryLogViewProps> = ({ onBack }) =
     setResendResult(null);
 
     try {
-      const { data, error } = await supabase.functions.invoke('send-invoice-email', {
-        body: { load_id: log.load_id },
+      const apiUrl = import.meta.env.VITE_API_URL || 'https://loadtracker-pro-2026-production.up.railway.app';
+      const emailResponse = await fetch(`${apiUrl}/api/send-invoice-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ load_id: log.load_id }),
       });
+      const data = await emailResponse.json();
 
-      if (error) {
-        setResendResult({ id: log.id, success: false, message: data?.error || error.message || 'Resend failed' });
+      if (!emailResponse.ok) {
+        setResendResult({ id: log.id, success: false, message: data?.error || 'Resend failed' });
       } else if (data?.success) {
         setResendResult({ id: log.id, success: true, message: data.message || 'Email resent successfully!' });
         // Refresh logs to show the new entry

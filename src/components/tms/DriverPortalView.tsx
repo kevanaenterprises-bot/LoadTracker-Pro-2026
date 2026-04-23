@@ -795,14 +795,18 @@ const DriverPortalView: React.FC<DriverPortalViewProps> = ({ onBack }) => {
           setInvoiceEmailStatus('sending');
           try {
             console.log(`[Auto-Invoice] Sending invoice ${invoiceNumber} email for load ${load.id}...`);
-            const { data: emailResult, error: emailError } = await supabase.functions.invoke('send-invoice-email', {
-              body: { load_id: load.id, auto_triggered: true },
+            const apiUrl = import.meta.env.VITE_API_URL || 'https://loadtracker-pro-2026-production.up.railway.app';
+            const emailResp = await fetch(`${apiUrl}/api/send-invoice-email`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ load_id: load.id }),
             });
+            const emailResult = await emailResp.json();
 
-            if (emailError) {
-              console.warn('[Auto-Invoice] Email edge function error:', emailError.message);
+            if (!emailResp.ok) {
+              console.warn('[Auto-Invoice] Email backend error:', emailResult?.error);
               setInvoiceEmailStatus('error');
-              setInvoiceEmailMessage(emailResult?.error || emailError.message || 'Failed to send invoice email');
+              setInvoiceEmailMessage(emailResult?.error || 'Failed to send invoice email');
             } else if (emailResult?.success) {
               console.log('[Auto-Invoice] Invoice email sent successfully:', emailResult.message);
               setInvoiceEmailStatus('sent');

@@ -172,28 +172,20 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     setTestEmailResult(null);
 
     try {
-      const { data, error } = await supabase.functions.invoke('send-invoice-email', {
-        body: { load_id: '__test__', test_email: testEmailAddress },
+      const apiUrl = import.meta.env.VITE_API_URL || 'https://loadtracker-pro-2026-production.up.railway.app';
+      const emailResponse = await fetch(`${apiUrl}/api/send-invoice-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ load_id: '__test__', test_email: testEmailAddress }),
       });
+      const data = await emailResponse.json();
 
-      if (error) {
-        const errorMsg = data?.error || data?.message || error.message || 'Unknown error';
-        const isNetworkError = errorMsg.toLowerCase().includes('failed to send') || errorMsg.toLowerCase().includes('network') || errorMsg.toLowerCase().includes('fetch');
-        setTestEmailResult({ 
-          success: false, 
-          message: isNetworkError 
-            ? `Network error reaching the edge function. This can happen if the function is cold-starting. Please try again in a few seconds. (${errorMsg})`
-            : `${errorMsg}${data?.fix_instructions ? ' — ' + data.fix_instructions : ''}`
-        });
+      if (!emailResponse.ok) {
+        setTestEmailResult({ success: false, message: data?.error || data?.message || 'Test failed' });
       } else if (data?.success) {
-        let msg = data.message || `Test email sent to ${testEmailAddress}!`;
-        if (data.warning) msg += ` (${data.warning})`;
-        if (data.resend_id) msg += ` [Resend ID: ${data.resend_id.substring(0, 12)}...]`;
-        setTestEmailResult({ success: true, message: msg });
+        setTestEmailResult({ success: true, message: data.message || `Test email sent to ${testEmailAddress}!` });
       } else {
-        let msg = data?.error || data?.message || 'Test failed';
-        if (data?.fix_instructions) msg += ` — Fix: ${data.fix_instructions}`;
-        setTestEmailResult({ success: false, message: msg });
+        setTestEmailResult({ success: false, message: data?.error || data?.message || 'Test failed' });
       }
     } catch (err: any) {
       setTestEmailResult({ 
@@ -210,13 +202,13 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     setDiagnosing(true);
     setDiagResult(null);
     try {
-      const { data, error } = await supabase.functions.invoke('send-invoice-email', {
-        body: { load_id: '__diagnose__' },
-      });
-      if (error) {
-        setDiagResult({ error: error.message });
+      const apiUrl = import.meta.env.VITE_API_URL || 'https://loadtracker-pro-2026-production.up.railway.app';
+      const diagResponse = await fetch(`${apiUrl}/api/health`);
+      const data = await diagResponse.json();
+      if (!diagResponse.ok) {
+        setDiagResult({ error: 'Backend unreachable' });
       } else {
-        setDiagResult(data);
+        setDiagResult({ status: 'ok', message: 'Outlook SMTP backend is reachable', ...data });
       }
     } catch (err: any) {
       setDiagResult({ error: err.message });
