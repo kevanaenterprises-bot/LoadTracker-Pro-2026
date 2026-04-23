@@ -328,11 +328,6 @@ const AssignDriverModal: React.FC<AssignDriverModalProps> = ({ isOpen, load, onC
                       {aiResponse.recommendations.length} picks
                     </span>
                   )}
-                  {usageCtx && usageCtx.tier === 'free' && (
-                    <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-semibold rounded-full">
-                      {usageCtx.getRemainingUses('ai_dispatch_calls')} left
-                    </span>
-                  )}
                   {showAiPanel ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
                 </div>
               </button>
