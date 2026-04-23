@@ -12,6 +12,73 @@ import {
 } from 'lucide-react';
 
 
+// Decode Google Maps encoded polyline into lat/lng points
+const decodePolyline = (encoded: string): [number, number][] => {
+  const pts: [number, number][] = [];
+  let i = 0, lat = 0, lng = 0;
+  while (i < encoded.length) {
+    let b, shift = 0, result = 0;
+    do { b = encoded.charCodeAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (result & 1) ? ~(result >> 1) : result >> 1;
+    shift = 0; result = 0;
+    do { b = encoded.charCodeAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += (result & 1) ? ~(result >> 1) : result >> 1;
+    pts.push([lat / 1e5, lng / 1e5]);
+  }
+  return pts;
+};
+
+// Reverse geocode a coordinate to US state abbreviation
+const getStateAtPoint = async (lat: number, lng: number, apiKey: string): Promise<string | null> => {
+  try {
+    const res = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&result_type=administrative_area_level_1&key=${apiKey}`
+    );
+    const data = await res.json();
+    if (data.status === 'OK' && data.results[0]) {
+      const comp = data.results[0].address_components.find((c: any) =>
+        c.types.includes('administrative_area_level_1')
+      );
+      return comp?.short_name || null;
+    }
+  } catch { /* skip */ }
+  return null;
+};
+
+// Use Google Maps to estimate per-state miles for a cross-state load
+// Samples 7 points along the route polyline and reverse-geocodes each point
+const estimateStateMilesViaRoute = async (
+  originCity: string, originState: string,
+  destCity: string, destState: string,
+  totalMiles: number, apiKey: string
+): Promise<Array<{ state: string; miles: number }> | null> => {
+  if (!totalMiles) return null;
+  const origin = encodeURIComponent(`${originCity}, ${originState}`);
+  const destination = encodeURIComponent(`${destCity}, ${destState}`);
+  const res = await fetch(
+    `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&key=${apiKey}`
+  );
+  const data = await res.json();
+  if (data.status !== 'OK' || !data.routes?.[0]) return null;
+
+  const pts = decodePolyline(data.routes[0].overview_polyline.points);
+  const SAMPLES = 7;
+  const sampled = Array.from({ length: SAMPLES }, (_, idx) =>
+    pts[Math.round(idx * (pts.length - 1) / (SAMPLES - 1))]
+  );
+
+  const states = await Promise.all(sampled.map(([lat, lng]) => getStateAtPoint(lat, lng, apiKey)));
+  const valid = states.filter(Boolean) as string[];
+  if (valid.length === 0) return null;
+
+  const counts: Record<string, number> = {};
+  valid.forEach(s => { counts[s] = (counts[s] || 0) + 1; });
+
+  return Object.entries(counts)
+    .map(([state, miles]) => ({ state, miles: Math.round((miles / valid.length) * totalMiles * 10) / 10 }))
+    .filter(e => e.miles > 0.5);
+};
+
 // IFTA tax rates per state (cents per gallon - 2025 approximate rates)
 const STATE_TAX_RATES: Record<string, number> = {
   AL:0.29,AK:0.0895,AZ:0.18,AR:0.245,CA:0.5387,CO:0.22,CT:0.25,DE:0.22,FL:0.35,GA:0.312,
@@ -245,9 +312,11 @@ const IFTAReportView: React.FC<Props> = ({ onBack }) => {
           destination_state: load.dest_state,
           destination_city: load.dest_city,
           total_miles: totalMiles,
-          notes: gpsTrackedMiles[load.id] 
-            ? `Auto-imported from Load #${load.load_number} (GPS-tracked state miles)` 
-            : `Auto-imported from Load #${load.load_number} (estimated split)`,
+          notes: gpsTrackedMiles[load.id]
+            ? `Auto-imported from Load #${load.load_number} (GPS-tracked state miles)`
+            : load.origin_state === load.dest_state
+              ? `Auto-imported from Load #${load.load_number}`
+              : `Auto-imported from Load #${load.load_number} (Google Maps route estimate)`,
         }).select('id').single();
 
         if (tripError || !tripData) continue;
@@ -283,10 +352,26 @@ const IFTAReportView: React.FC<Props> = ({ onBack }) => {
           stateEntries.push({ ifta_trip_id: tripData.id, state: load.origin_state, miles: totalMiles });
           estimatedCount++;
         } else {
-          // Different states, no GPS data - split evenly (user can edit later)
-          const halfMiles = totalMiles / 2;
-          stateEntries.push({ ifta_trip_id: tripData.id, state: load.origin_state, miles: Math.round(halfMiles * 10) / 10 });
-          stateEntries.push({ ifta_trip_id: tripData.id, state: load.dest_state, miles: Math.round(halfMiles * 10) / 10 });
+          // Different states, no GPS data — use Google Maps route sampling for accurate state miles
+          const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+          let routeStates: Array<{ state: string; miles: number }> | null = null;
+          if (apiKey && load.origin_city && load.dest_city && totalMiles > 0) {
+            try {
+              routeStates = await estimateStateMilesViaRoute(
+                load.origin_city, load.origin_state,
+                load.dest_city, load.dest_state,
+                totalMiles, apiKey
+              );
+            } catch { /* fall through to 50/50 */ }
+          }
+          if (routeStates && routeStates.length > 0) {
+            routeStates.forEach(r => stateEntries.push({ ifta_trip_id: tripData.id, state: r.state, miles: r.miles }));
+          } else {
+            // Fallback: split evenly (user can edit later)
+            const halfMiles = totalMiles / 2;
+            stateEntries.push({ ifta_trip_id: tripData.id, state: load.origin_state, miles: Math.round(halfMiles * 10) / 10 });
+            stateEntries.push({ ifta_trip_id: tripData.id, state: load.dest_state, miles: Math.round(halfMiles * 10) / 10 });
+          }
           estimatedCount++;
         }
 
