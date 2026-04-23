@@ -1234,13 +1234,7 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                     </tbody>
                   </table>
 
-                  {/* Total Due Bar */}
-                  <div className="total-bar" style={{ background: 'linear-gradient(135deg, #1e40af, #3b82f6)', borderRadius: '8px', padding: '10px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                    <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: '13px', fontWeight: 600 }}>Total Amount Due</span>
-                    <span style={{ color: 'white', fontSize: '22px', fontWeight: 800 }}>${fmt(invoice.amount)}</span>
-                  </div>
-
-                  {/* GPS-Verified Section */}
+                  {/* Arrival & Departure Times — printed for detention documentation */}
                   <div className="gps-section" style={{ border: '2px solid #93c5fd', borderRadius: '8px', overflow: 'hidden', marginBottom: '10px' }}>
                     <div className="gps-header" style={{ background: 'linear-gradient(135deg, #dbeafe, #eff6ff)', padding: '8px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <h3 style={{ fontSize: '11px', fontWeight: 700, color: '#1e40af', margin: 0 }}>GPS-Verified Arrival & Departure Times</h3>
@@ -1261,6 +1255,12 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
                         : renderStopBlock('delivery', 'Receiver / Delivery', null, 0, 1)
                       }
                     </div>
+                  </div>
+
+                  {/* Total Due Bar */}
+                  <div className="total-bar" style={{ background: 'linear-gradient(135deg, #1e40af, #3b82f6)', borderRadius: '8px', padding: '10px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: '13px', fontWeight: 600 }}>Total Amount Due</span>
+                    <span style={{ color: 'white', fontSize: '22px', fontWeight: 800 }}>${fmt(invoice.amount)}</span>
                   </div>
 
                   {/* Payment Terms */}
