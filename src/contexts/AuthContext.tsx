@@ -73,34 +73,27 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children, startInDem
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
+      // Use RPC function so login works regardless of RLS policies on the users table
       const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('email', email.toLowerCase().trim())
-        .eq('password_hash', password)
-        .eq('is_active', true)
-        .single();
+        .rpc('authenticate_user', {
+          p_email: email.toLowerCase().trim(),
+          p_password: password.trim(),
+        });
 
-      if (error || !data) {
+      if (error || !data || data.length === 0) {
         return { success: false, error: 'Invalid email or password' };
       }
 
+      const row = data[0];
       const userData: User = {
-        id: data.id,
-        email: data.email,
-        role: data.role,
-        driver_id: data.driver_id,
-        name: data.name,
-        is_active: data.is_active,
+        id: row.id,
+        email: row.email,
+        role: row.role as 'admin' | 'driver',
+        driver_id: row.driver_id,
+        name: row.name,
+        is_active: row.is_active,
       };
 
-      // Update last login
-      await supabase
-        .from('users')
-        .update({ last_login: new Date().toISOString() })
-        .eq('id', data.id);
-
-      // Store in localStorage
       localStorage.setItem('tms_user', JSON.stringify(userData));
       setUser(userData);
 
