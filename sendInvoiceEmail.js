@@ -3,15 +3,15 @@ const nodemailer = require('nodemailer');
 async function sendInvoiceEmail({ to, cc, subject, text, attachments }) {
   const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
+    port: 465,
+    secure: true,
     auth: {
       user: process.env.OUTLOOK_USER,
       pass: process.env.OUTLOOK_PASS
     },
-    connectionTimeout: 15000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
+    connectionTimeout: 30000,
+    greetingTimeout: 20000,
+    socketTimeout: 30000,
   });
 
   const mailOptions = {
