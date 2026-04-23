@@ -246,18 +246,23 @@ app.post('/api/send-invoice-email', async (req, res) => {
 
     // Handle test email scenario
     if (load_id === '__test__' && test_email) {
-      await sendInvoiceEmail({
-        to: test_email,
-        cc: ['kevin@go4fc.com'],
-        subject: '🔔 Test Invoice Email from GO 4 Farms & Cattle',
-        text: 'This is a test email to verify your invoice email configuration.\n\nIf you received this, everything is working correctly!\n\nThank you,\nGO 4 Farms & Cattle',
-        attachments: []
-      });
-
-      return res.json({ 
-        success: true, 
-        message: `Test email sent successfully to ${test_email}!` 
-      });
+      console.log('[Test Email] Attempting SMTP send to:', test_email);
+      console.log('[Test Email] OUTLOOK_USER set:', !!process.env.OUTLOOK_USER);
+      console.log('[Test Email] OUTLOOK_PASS set:', !!process.env.OUTLOOK_PASS);
+      try {
+        await sendInvoiceEmail({
+          to: test_email,
+          cc: ['kevin@go4fc.com'],
+          subject: '🔔 Test Invoice Email from GO 4 Farms & Cattle',
+          text: 'This is a test email to verify your invoice email configuration.\n\nIf you received this, everything is working correctly!\n\nThank you,\nGO 4 Farms & Cattle',
+          attachments: []
+        });
+        console.log('[Test Email] SMTP send succeeded');
+        return res.json({ success: true, message: `Test email sent successfully to ${test_email}!` });
+      } catch (smtpErr) {
+        console.error('[Test Email] SMTP error:', smtpErr.message);
+        return res.status(500).json({ error: `SMTP failed: ${smtpErr.message}` });
+      }
     }
 
     // Validate load_id for real invoice sends

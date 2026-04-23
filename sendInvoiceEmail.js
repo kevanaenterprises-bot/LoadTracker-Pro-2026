@@ -7,8 +7,11 @@ async function sendInvoiceEmail({ to, cc, subject, text, attachments }) {
     secure: false,
     auth: {
       user: process.env.OUTLOOK_USER,
-      pass: process.env.OUTLOOK_PASS 
-    }
+      pass: process.env.OUTLOOK_PASS
+    },
+    connectionTimeout: 15000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
   });
 
   const mailOptions = {
