@@ -402,6 +402,25 @@ const DriverDashboard: React.FC = () => {
         .update({ status: 'INVOICED' })
         .eq('id', load.id);
 
+      // Auto-send invoice email with POD attachment
+      try {
+        const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://loadtracker-pro-2026-production.up.railway.app';
+        const emailRes = await fetch(`${BACKEND_URL}/api/send-invoice-email`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ load_id: load.id }),
+        });
+        if (!emailRes.ok) {
+          const errText = await emailRes.text();
+          console.error('Auto-email failed:', errText);
+        } else {
+          console.log('Invoice email auto-sent after POD upload');
+        }
+      } catch (emailErr) {
+        console.error('Auto-email request failed:', emailErr);
+        // Non-fatal — POD is uploaded and invoice is created regardless
+      }
+
       // Record departed timestamp for delivery stops that don't have one yet (POD = proof of departure)
       for (const stop of stopsRef.current.filter(s => s.stop_type === 'delivery')) {
         await saveGeofenceTimestamp(load.id, stop.id, 'delivery', 'departed', null, null, 'pod_upload');

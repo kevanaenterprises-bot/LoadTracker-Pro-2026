@@ -369,58 +369,33 @@ app.post('/api/send-invoice-email', async (req, res) => {
 
     // Fetch POD/supporting documents for this load
     const { data: podDocuments } = await supabase
-      .from('loads_documents')
+      .from('pod_documents')
       .select('*')
       .eq('load_id', load_id)
       .order('created_at', { ascending: true });
 
     console.log('[Invoice Email] Found', podDocuments?.length || 0, 'POD documents');
 
-    // Prepare files for PDF combining (invoice first, then PODs)
-    let filesToCombine = [];
-    
-    if (pdfBase64) {
-      // Add invoice PDF as first file
-      filesToCombine.push({
-        type: 'pdf',
-        data: pdfBase64,
-        filename: `Invoice-${invoiceNumber}.pdf`
-      });
-    } else if (invoiceData && invoiceData.pdfPath) {
-      // Read invoice PDF from file path
-      const fs = require('fs').promises;
-      const invoicePdfData = await fs.readFile(invoiceData.pdfPath);
-      filesToCombine.push({
-        type: 'pdf',
-        data: invoicePdfData,
-        filename: `Invoice-${invoiceNumber}.pdf`
-      });
-    }
-
-    // Add POD documents
+    // Fetch POD files via their public URLs (file_url column)
+    const imageExtensions = ['.jpg', '.jpeg', '.png'];
+    const podFiles = [];
     if (podDocuments && podDocuments.length > 0) {
       for (const doc of podDocuments) {
         try {
-          // Fetch the actual file from storage
-          if (doc.storage_path) {
-            const { data: fileData, error: downloadError } = await supabase
-              .storage
-              .from('load-documents')
-              .download(doc.storage_path);
-
-            if (!downloadError && fileData) {
-              const buffer = Buffer.from(await fileData.arrayBuffer());
-              const fileType = doc.file_type?.toLowerCase();
-              
-              // Determine if it's an image or PDF
-              const imageExtensions = ['.jpg', '.jpeg', '.png'];
-              const ext = path.extname(doc.file_name).toLowerCase();
-              
-              filesToCombine.push({
+          if (doc.file_url) {
+            const response = await fetch(doc.file_url);
+            if (response.ok) {
+              const arrayBuffer = await response.arrayBuffer();
+              const buffer = Buffer.from(arrayBuffer);
+              const ext = path.extname(doc.file_name || '').toLowerCase();
+              podFiles.push({
                 type: imageExtensions.includes(ext) ? 'image' : 'pdf',
                 data: buffer,
-                filename: doc.file_name
+                filename: doc.file_name || `pod-${doc.id}${ext}`
               });
+              console.log(`[Invoice Email] Fetched POD: ${doc.file_name}`);
+            } else {
+              console.warn(`[Invoice Email] Failed to fetch POD ${doc.file_name}: HTTP ${response.status}`);
             }
           }
         } catch (err) {
@@ -429,32 +404,59 @@ app.post('/api/send-invoice-email', async (req, res) => {
       }
     }
 
-    // Combine all PDFs and images into one file
+    // Build attachment(s)
+    // Strategy: attach invoice PDF directly (avoids pdf-lib re-encoding jsPDF output),
+    // then combine any POD images/PDFs into a second PDF if present.
     let attachments = [];
-    
-    if (filesToCombine.length > 0) {
-      console.log('[Invoice Email] Combining', filesToCombine.length, 'files into one PDF');
-      
-      try {
-        const combinedPdfBuffer = await combinePDFs(filesToCombine);
-        attachments.push({
-          filename: `Invoice-${invoiceNumber}-Complete.pdf`,
-          content: combinedPdfBuffer
-        });
-        console.log('[Invoice Email] Combined PDF created successfully');
-      } catch (combineError) {
-        console.error('[Invoice Email] PDF combination failed:', combineError);
-        // Fallback: send individual files
-        if (pdfBase64) {
-          attachments.push({
-            filename: `Invoice-${invoiceNumber}.pdf`,
-            content: pdfBase64,
-            encoding: 'base64'
-          });
+
+    if (pdfBase64) {
+      const invoiceBuf = Buffer.from(pdfBase64, 'base64');
+
+      if (podFiles.length > 0) {
+        // Combine invoice + POD files into one PDF via pdf-lib
+        const allFiles = [
+          { type: 'pdf', data: invoiceBuf, filename: `Invoice-${invoiceNumber}.pdf` },
+          ...podFiles
+        ];
+        try {
+          const combinedBuf = await combinePDFs(allFiles);
+          // If combined PDF is unreasonably small, pdf-lib couldn't parse the invoice page —
+          // fall back to two separate attachments so nothing is lost.
+          if (combinedBuf.length > 2000) {
+            attachments.push({
+              filename: `Invoice-${invoiceNumber}-Complete.pdf`,
+              content: combinedBuf
+            });
+            console.log('[Invoice Email] Combined invoice + POD PDF created successfully');
+          } else {
+            console.warn('[Invoice Email] Combined PDF suspiciously small, sending separately');
+            attachments.push({ filename: `Invoice-${invoiceNumber}.pdf`, content: invoiceBuf });
+            const podBuf = await combinePDFs(podFiles);
+            if (podBuf.length > 500) attachments.push({ filename: `POD-Documents.pdf`, content: podBuf });
+          }
+        } catch (combineError) {
+          console.error('[Invoice Email] PDF combination failed, sending separately:', combineError);
+          attachments.push({ filename: `Invoice-${invoiceNumber}.pdf`, content: invoiceBuf });
+          try {
+            const podBuf = await combinePDFs(podFiles);
+            if (podBuf.length > 500) attachments.push({ filename: `POD-Documents.pdf`, content: podBuf });
+          } catch {}
         }
+      } else {
+        // No PODs — just attach the invoice PDF directly
+        attachments.push({ filename: `Invoice-${invoiceNumber}.pdf`, content: invoiceBuf });
+        console.log('[Invoice Email] Attaching invoice PDF only (no POD documents found)');
+      }
+    } else if (podFiles.length > 0) {
+      // No invoice PDF passed — combine whatever POD files we have
+      try {
+        const combinedBuf = await combinePDFs(podFiles);
+        attachments.push({ filename: `Invoice-${invoiceNumber}-Complete.pdf`, content: combinedBuf });
+      } catch (err) {
+        console.error('[Invoice Email] Failed to combine POD files:', err);
       }
     } else {
-      console.warn('[Invoice Email] No files to combine - sending without attachment');
+      console.warn('[Invoice Email] No invoice PDF and no POD documents — sending email without attachment');
     }
 
     // Send the email
