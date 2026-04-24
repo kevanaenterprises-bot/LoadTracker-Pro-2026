@@ -2,9 +2,122 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
+const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const sendInvoiceEmail = require('./sendInvoiceEmail');
 const { combinePDFs } = require('./combinePDFs');
 require('dotenv').config();
+
+/**
+ * Generate a clean, text-based invoice PDF server-side using pdf-lib.
+ * Used when the frontend doesn't supply pdfBase64 (e.g. auto-send on POD upload).
+ */
+async function generateServerInvoicePdf(load, invoice, customer, companyName) {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([612, 792]); // US Letter
+  const { width, height } = page.getSize();
+
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const regular = await doc.embedFont(StandardFonts.Helvetica);
+
+  const black = rgb(0, 0, 0);
+  const grey = rgb(0.45, 0.45, 0.45);
+  const blue = rgb(0.05, 0.35, 0.7);
+  const lightGrey = rgb(0.92, 0.92, 0.92);
+
+  let y = height - 48;
+  const left = 48;
+  const right = width - 48;
+
+  // ── Header bar ──────────────────────────────────────────────────────────
+  page.drawRectangle({ x: left, y: y - 4, width: right - left, height: 36, color: blue });
+  page.drawText(companyName || 'GO 4 Farms & Cattle', {
+    x: left + 10, y: y + 6, size: 16, font: bold, color: rgb(1, 1, 1),
+  });
+  page.drawText(`INVOICE`, {
+    x: right - 80, y: y + 6, size: 16, font: bold, color: rgb(1, 1, 1),
+  });
+  y -= 52;
+
+  // ── Invoice meta ────────────────────────────────────────────────────────
+  const invoiceDate = invoice.created_at
+    ? new Date(invoice.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+  page.drawText(`Invoice #: ${invoice.invoice_number}`, { x: left, y, size: 11, font: bold, color: black });
+  page.drawText(`Date: ${invoiceDate}`, { x: right - 140, y, size: 10, font: regular, color: black });
+  y -= 18;
+  page.drawText(`Load #: ${load.load_number || '—'}`, { x: left, y, size: 10, font: regular, color: grey });
+  y -= 28;
+
+  // ── Divider ──────────────────────────────────────────────────────────────
+  page.drawLine({ start: { x: left, y }, end: { x: right, y }, thickness: 0.5, color: lightGrey });
+  y -= 20;
+
+  // ── Bill To ──────────────────────────────────────────────────────────────
+  page.drawText('BILL TO', { x: left, y, size: 9, font: bold, color: grey });
+  y -= 14;
+  page.drawText(customer.name || '—', { x: left, y, size: 11, font: bold, color: black });
+  y -= 14;
+  if (customer.address) {
+    page.drawText(customer.address, { x: left, y, size: 10, font: regular, color: black });
+    y -= 14;
+  }
+  const cityLine = [customer.city, customer.state, customer.zip].filter(Boolean).join(', ');
+  if (cityLine) {
+    page.drawText(cityLine, { x: left, y, size: 10, font: regular, color: black });
+    y -= 14;
+  }
+  if (customer.pod_email || customer.email) {
+    page.drawText(customer.pod_email || customer.email, { x: left, y, size: 9, font: regular, color: grey });
+    y -= 14;
+  }
+  y -= 16;
+
+  // ── Route ────────────────────────────────────────────────────────────────
+  page.drawLine({ start: { x: left, y }, end: { x: right, y }, thickness: 0.5, color: lightGrey });
+  y -= 16;
+  const origin = [load.origin_city, load.origin_state].filter(Boolean).join(', ') || '—';
+  const dest = [load.dest_city, load.dest_state].filter(Boolean).join(', ') || '—';
+  page.drawText(`Route: ${origin}  →  ${dest}`, { x: left, y, size: 10, font: regular, color: black });
+  y -= 22;
+
+  // ── Charges table header ─────────────────────────────────────────────────
+  page.drawRectangle({ x: left, y: y - 4, width: right - left, height: 20, color: lightGrey });
+  page.drawText('Description', { x: left + 8, y: y + 2, size: 9, font: bold, color: black });
+  page.drawText('Amount', { x: right - 70, y: y + 2, size: 9, font: bold, color: black });
+  y -= 24;
+
+  const fmt = (n) => `$${Number(n || 0).toFixed(2)}`;
+
+  const rows = [
+    ['Freight Charge', load.rate],
+  ];
+  if (load.fuel_surcharge) rows.push(['Fuel Surcharge', load.fuel_surcharge]);
+  if (load.extra_stop_fee) rows.push(['Extra Stop Fee', load.extra_stop_fee]);
+  if (load.lumper_fee) rows.push(['Lumper Fee', load.lumper_fee]);
+  if (load.detention_pay) rows.push(['Detention Pay', load.detention_pay]);
+
+  for (const [desc, amt] of rows) {
+    page.drawText(desc, { x: left + 8, y, size: 10, font: regular, color: black });
+    page.drawText(fmt(amt), { x: right - 70, y, size: 10, font: regular, color: black });
+    y -= 18;
+  }
+
+  // ── Total bar ────────────────────────────────────────────────────────────
+  y -= 8;
+  page.drawRectangle({ x: left, y: y - 6, width: right - left, height: 26, color: blue });
+  page.drawText('TOTAL DUE', { x: left + 10, y: y + 4, size: 11, font: bold, color: rgb(1, 1, 1) });
+  page.drawText(fmt(invoice.amount), { x: right - 80, y: y + 4, size: 13, font: bold, color: rgb(1, 1, 1) });
+  y -= 44;
+
+  // ── Payment terms ─────────────────────────────────────────────────────────
+  page.drawText('Payment due within 30 days. Thank you for your business!', {
+    x: left, y, size: 9, font: regular, color: grey,
+  });
+
+  const pdfBytes = await doc.save();
+  return Buffer.from(pdfBytes);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -405,58 +518,49 @@ app.post('/api/send-invoice-email', async (req, res) => {
     }
 
     // Build attachment(s)
-    // Strategy: attach invoice PDF directly (avoids pdf-lib re-encoding jsPDF output),
-    // then combine any POD images/PDFs into a second PDF if present.
     let attachments = [];
 
     if (pdfBase64) {
-      const invoiceBuf = Buffer.from(pdfBase64, 'base64');
+      // The frontend already combined invoice + PODs into one PDF (generateCombinedInvoicePdfBase64).
+      // Attach it directly — DO NOT run it through pdf-lib again; html2canvas output is not
+      // compatible with PDFDocument.load() and the invoice pages will be silently dropped.
+      console.log('[Invoice Email] Attaching frontend-generated combined PDF directly');
+      attachments.push({
+        filename: `Invoice-${invoiceNumber}.pdf`,
+        content: Buffer.from(pdfBase64, 'base64'),
+      });
+    } else {
+      // Auto-send path (e.g. driver POD upload) — no frontend PDF supplied.
+      // Generate a clean invoice PDF server-side, then combine with any POD images.
+      console.log('[Invoice Email] No pdfBase64 — generating server-side invoice PDF');
+      try {
+        const invoiceBuf = await generateServerInvoicePdf(load, invoice, customer, companyName);
 
-      if (podFiles.length > 0) {
-        // Combine invoice + POD files into one PDF via pdf-lib
-        const allFiles = [
-          { type: 'pdf', data: invoiceBuf, filename: `Invoice-${invoiceNumber}.pdf` },
-          ...podFiles
-        ];
-        try {
+        if (podFiles.length > 0) {
+          const allFiles = [
+            { type: 'pdf', data: invoiceBuf, filename: `Invoice-${invoiceNumber}.pdf` },
+            ...podFiles,
+          ];
           const combinedBuf = await combinePDFs(allFiles);
-          // If combined PDF is unreasonably small, pdf-lib couldn't parse the invoice page —
-          // fall back to two separate attachments so nothing is lost.
-          if (combinedBuf.length > 2000) {
-            attachments.push({
-              filename: `Invoice-${invoiceNumber}-Complete.pdf`,
-              content: combinedBuf
-            });
-            console.log('[Invoice Email] Combined invoice + POD PDF created successfully');
-          } else {
-            console.warn('[Invoice Email] Combined PDF suspiciously small, sending separately');
-            attachments.push({ filename: `Invoice-${invoiceNumber}.pdf`, content: invoiceBuf });
-            const podBuf = await combinePDFs(podFiles);
-            if (podBuf.length > 500) attachments.push({ filename: `POD-Documents.pdf`, content: podBuf });
-          }
-        } catch (combineError) {
-          console.error('[Invoice Email] PDF combination failed, sending separately:', combineError);
+          attachments.push({
+            filename: `Invoice-${invoiceNumber}.pdf`,
+            content: combinedBuf.length > 2000 ? combinedBuf : invoiceBuf,
+          });
+          console.log('[Invoice Email] Server-side invoice + POD combined PDF created');
+        } else {
           attachments.push({ filename: `Invoice-${invoiceNumber}.pdf`, content: invoiceBuf });
+          console.log('[Invoice Email] Server-side invoice PDF only (no POD documents found)');
+        }
+      } catch (genErr) {
+        console.error('[Invoice Email] Server-side PDF generation failed:', genErr);
+        // Last-resort fallback: attach just the POD images if we have them
+        if (podFiles.length > 0) {
           try {
             const podBuf = await combinePDFs(podFiles);
-            if (podBuf.length > 500) attachments.push({ filename: `POD-Documents.pdf`, content: podBuf });
+            attachments.push({ filename: `POD-Documents.pdf`, content: podBuf });
           } catch {}
         }
-      } else {
-        // No PODs — just attach the invoice PDF directly
-        attachments.push({ filename: `Invoice-${invoiceNumber}.pdf`, content: invoiceBuf });
-        console.log('[Invoice Email] Attaching invoice PDF only (no POD documents found)');
       }
-    } else if (podFiles.length > 0) {
-      // No invoice PDF passed — combine whatever POD files we have
-      try {
-        const combinedBuf = await combinePDFs(podFiles);
-        attachments.push({ filename: `Invoice-${invoiceNumber}-Complete.pdf`, content: combinedBuf });
-      } catch (err) {
-        console.error('[Invoice Email] Failed to combine POD files:', err);
-      }
-    } else {
-      console.warn('[Invoice Email] No invoice PDF and no POD documents — sending email without attachment');
     }
 
     // Send the email
