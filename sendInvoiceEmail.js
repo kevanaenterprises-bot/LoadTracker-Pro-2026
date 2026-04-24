@@ -14,7 +14,10 @@ async function sendInvoiceEmail({ to, cc, subject, text, attachments }) {
     attachments: attachments && attachments.length > 0
       ? attachments.map(a => ({
           filename: a.filename,
-          content: a.content, // base64 string
+          // Resend requires base64 string — convert Buffer if needed
+          content: Buffer.isBuffer(a.content)
+            ? a.content.toString('base64')
+            : (typeof a.content === 'string' ? a.content : ''),
         }))
       : undefined,
   };

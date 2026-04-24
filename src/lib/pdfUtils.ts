@@ -11,6 +11,44 @@ const CONTENT_W = PAGE_W - MARGIN * 2;
 const CONTENT_H = PAGE_H - MARGIN * 2;
 
 /**
+ * Read JPEG EXIF orientation from an ArrayBuffer.
+ * Returns 1 (no rotation) if it cannot be determined.
+ * Values: 1=normal, 3=180°, 6=90°CW, 8=90°CCW
+ */
+function readExifOrientation(buf: ArrayBuffer): number {
+  try {
+    const view = new DataView(buf);
+    if (view.byteLength < 4 || view.getUint16(0, false) !== 0xFFD8) return 1;
+    let offset = 2;
+    while (offset + 4 <= view.byteLength) {
+      const marker = view.getUint16(offset, false);
+      const segLen = view.getUint16(offset + 2, false);
+      if (marker === 0xFFE1) { // APP1
+        if (view.getUint32(offset + 4, false) === 0x45786966) { // 'Exif'
+          const tiff = offset + 10;
+          const le = view.getUint16(tiff, false) === 0x4949; // 'II' = little-endian
+          const ifd0 = tiff + (le ? view.getUint32(tiff + 4, true) : view.getUint32(tiff + 4, false));
+          if (ifd0 + 2 > view.byteLength) return 1;
+          const numTags = le ? view.getUint16(ifd0, true) : view.getUint16(ifd0, false);
+          for (let i = 0; i < numTags; i++) {
+            const e = ifd0 + 2 + i * 12;
+            if (e + 12 > view.byteLength) break;
+            const tag = le ? view.getUint16(e, true) : view.getUint16(e, false);
+            if (tag === 0x0112) { // Orientation tag
+              return le ? view.getUint16(e + 8, true) : view.getUint16(e + 8, false);
+            }
+          }
+        }
+      } else if (marker === 0xFFDA) {
+        break; // Start of scan
+      }
+      offset += 2 + segLen;
+    }
+  } catch {}
+  return 1;
+}
+
+/**
  * Load an image from URL and return as HTMLImageElement.
  * Uses a canvas proxy to handle CORS images.
  */
@@ -26,21 +64,62 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 
 /**
  * Convert an image element to a data URL via canvas.
+ * Reads EXIF orientation from the source URL and rotates the canvas so
+ * portrait photos taken on a phone never appear sideways.
  */
-function imageToDataUrl(img: HTMLImageElement, format: 'JPEG' | 'PNG' = 'JPEG'): string {
+async function imageToDataUrl(
+  img: HTMLImageElement,
+  url: string,
+  format: 'JPEG' | 'PNG' = 'JPEG'
+): Promise<string> {
+  // Read EXIF orientation (defensive — fall back to 1 on any error)
+  let orientation = 1;
+  try {
+    const resp = await fetch(url, { mode: 'cors' });
+    const buf = await resp.arrayBuffer();
+    orientation = readExifOrientation(buf);
+  } catch { /* ignore — will draw without rotation */ }
+
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+
+  // Orientations 5-8 are 90°/270° rotated — swap canvas dimensions
+  const needsSwap = orientation >= 5 && orientation <= 8;
   const canvas = document.createElement('canvas');
-  canvas.width = img.naturalWidth;
-  canvas.height = img.naturalHeight;
+  canvas.width  = needsSwap ? h : w;
+  canvas.height = needsSwap ? w : h;
+
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Could not get canvas context');
-  
-  // White background for JPEG (no transparency)
+
   if (format === 'JPEG') {
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
-  
-  ctx.drawImage(img, 0, 0);
+
+  ctx.save();
+  // Apply canvas rotation matching EXIF orientation.
+  // In HTML canvas: positive angle = CW (y-axis points down).
+  //   orientation 6 (90° CW)  → translate(0, canvas.height) + rotate(-π/2)
+  //   orientation 8 (90° CCW) → translate(canvas.width,  0) + rotate(+π/2)
+  //   orientation 3 (180°)    → translate(canvas.width, canvas.height) + rotate(π)
+  switch (orientation) {
+    case 6:
+      ctx.translate(0, canvas.height);
+      ctx.rotate(-Math.PI / 2);
+      break;
+    case 8:
+      ctx.translate(canvas.width, 0);
+      ctx.rotate(Math.PI / 2);
+      break;
+    case 3:
+      ctx.translate(canvas.width, canvas.height);
+      ctx.rotate(Math.PI);
+      break;
+  }
+  ctx.drawImage(img, 0, 0, w, h);
+  ctx.restore();
+
   return canvas.toDataURL(`image/${format.toLowerCase()}`, 0.92);
 }
 
@@ -189,7 +268,7 @@ export async function generateInvoicePdf(options: PdfGenerationOptions): Promise
     try {
       // Load the image
       const img = await loadImage(doc.file_url);
-      const dataUrl = imageToDataUrl(img, 'JPEG');
+      const dataUrl = await imageToDataUrl(img, doc.file_url, 'JPEG');
 
       // Add new page
       pdf.addPage('letter', 'portrait');
@@ -280,7 +359,7 @@ export async function convertImageToPdf(
   onProgress?.('Loading image...');
 
   const img = await loadImage(imageUrl);
-  const dataUrl = imageToDataUrl(img, 'JPEG');
+  const dataUrl = await imageToDataUrl(img, imageUrl, 'JPEG');
 
   const pdf = new jsPDF({
     orientation: 'portrait',
@@ -327,7 +406,7 @@ export async function convertPodsToPdf(
 
     try {
       const img = await loadImage(doc.file_url);
-      const dataUrl = imageToDataUrl(img, 'JPEG');
+      const dataUrl = await imageToDataUrl(img, doc.file_url, 'JPEG');
 
       // Add blue header
       addPodPageHeader(
@@ -468,5 +547,5 @@ export async function generateCombinedInvoicePdfBase64(options: PdfGenerationOpt
  */
 export async function loadImageToDataUrl(url: string): Promise<string> {
   const img = await loadImage(url);
-  return imageToDataUrl(img, 'JPEG');
+  return imageToDataUrl(img, url, 'JPEG');
 }
