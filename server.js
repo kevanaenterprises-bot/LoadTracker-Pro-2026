@@ -65,6 +65,9 @@ async function generateServerInvoicePdf(load, invoice, customer, companyName) {
   page.drawText(sanitizeText(`Date: ${invoiceDate}`), { x: right - 140, y, size: 10, font: regular, color: black });
   y -= 18;
   page.drawText(sanitizeText(`Load #: ${load.load_number || '-'}`), { x: left, y, size: 10, font: regular, color: grey });
+  if (load.bol_number) {
+    page.drawText(sanitizeText(`BOL #: ${load.bol_number}`), { x: left + 160, y, size: 10, font: regular, color: grey });
+  }
   y -= 28;
 
   // ── Divider ──────────────────────────────────────────────────────────────

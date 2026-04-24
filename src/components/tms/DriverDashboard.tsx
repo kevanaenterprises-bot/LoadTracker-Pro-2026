@@ -25,6 +25,7 @@ const DriverDashboard: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [submittingPod, setSubmittingPod] = useState(false);
+  const [bolNumber, setBolNumber] = useState('');
   const [uploadedFiles, setUploadedFiles] = useState<{ [loadId: string]: string[] }>({});
   const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
   const [stops, setStops] = useState<LoadStop[]>([]);
@@ -394,8 +395,18 @@ const DriverDashboard: React.FC = () => {
 
   // Step 2: finalize — create invoice, send email, update statuses
   const handleSubmitPod = async (load: Load) => {
+    if (!bolNumber.trim()) {
+      alert('Please enter the BOL # before submitting.');
+      return;
+    }
     setSubmittingPod(true);
     try {
+      // Save BOL # to the load first
+      await supabase
+        .from('loads')
+        .update({ bol_number: bolNumber.trim() })
+        .eq('id', load.id);
+
       await supabase
         .from('loads')
         .update({ status: 'DELIVERED', delivered_at: new Date().toISOString() })
@@ -1017,6 +1028,28 @@ const DriverDashboard: React.FC = () => {
                 </div>
               </div>
 
+              {/* BOL # — required before submit */}
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <FileText className="w-5 h-5 text-blue-600" />
+                  <h2 className="text-lg font-bold text-slate-800">BOL Number</h2>
+                  <span className="text-xs bg-red-100 text-red-600 font-semibold px-2 py-0.5 rounded-full">Required</span>
+                </div>
+                <p className="text-sm text-slate-500 mb-3">Enter the Bill of Lading number from your paperwork. This is required before submitting.</p>
+                <input
+                  type="text"
+                  value={bolNumber}
+                  onChange={(e) => setBolNumber(e.target.value)}
+                  placeholder="e.g. BOL-2024-001234"
+                  disabled={submittingPod}
+                  className={`w-full px-4 py-3 rounded-xl border-2 text-slate-800 font-medium text-base focus:outline-none transition-colors ${
+                    bolNumber.trim()
+                      ? 'border-emerald-400 bg-emerald-50 focus:border-emerald-500'
+                      : 'border-slate-300 bg-white focus:border-blue-400'
+                  }`}
+                />
+              </div>
+
               {/* Upload POD Documents */}
               <div className="bg-white rounded-2xl shadow-lg p-6">
                 <h2 className="text-lg font-bold text-slate-800 mb-1">Upload POD Documents</h2>
@@ -1067,29 +1100,36 @@ const DriverDashboard: React.FC = () => {
                   </div>
                 </label>
 
-                {/* Submit button — only shown after at least one file is uploaded */}
+                {/* Submit button — shown once at least one file is uploaded */}
                 {(uploadedFiles[selectedLoad.id]?.length ?? 0) > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => handleSubmitPod(selectedLoad)}
-                    disabled={uploading || submittingPod}
-                    className="w-full py-4 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl font-bold text-base hover:from-emerald-600 hover:to-green-700 flex items-center justify-center gap-3 disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-md"
-                  >
-                    {submittingPod ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        Submitting & Sending Invoice...
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle className="w-5 h-5" />
-                        Submit POD &amp; Send Invoice
-                        <span className="text-emerald-200 text-sm font-normal">
-                          ({uploadedFiles[selectedLoad.id]?.length} file{uploadedFiles[selectedLoad.id]?.length !== 1 ? 's' : ''})
-                        </span>
-                      </>
+                  <>
+                    {!bolNumber.trim() && (
+                      <p className="text-center text-sm text-amber-600 font-medium mb-2">
+                        ⚠️ Enter the BOL # above before submitting
+                      </p>
                     )}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSubmitPod(selectedLoad)}
+                      disabled={uploading || submittingPod || !bolNumber.trim()}
+                      className="w-full py-4 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl font-bold text-base hover:from-emerald-600 hover:to-green-700 flex items-center justify-center gap-3 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-md"
+                    >
+                      {submittingPod ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          Submitting &amp; Sending Invoice...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="w-5 h-5" />
+                          Submit POD &amp; Send Invoice
+                          <span className="text-emerald-200 text-sm font-normal">
+                            ({uploadedFiles[selectedLoad.id]?.length} file{uploadedFiles[selectedLoad.id]?.length !== 1 ? 's' : ''})
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  </>
                 )}
               </div>
             </>
