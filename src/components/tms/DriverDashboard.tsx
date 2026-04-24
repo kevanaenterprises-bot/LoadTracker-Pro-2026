@@ -24,6 +24,7 @@ const DriverDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [submittingPod, setSubmittingPod] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<{ [loadId: string]: string[] }>({});
   const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
   const [stops, setStops] = useState<LoadStop[]>([]);
@@ -360,14 +361,14 @@ const DriverDashboard: React.FC = () => {
     }
   };
 
+  // Step 1: just upload files to storage — driver can call this multiple times
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, load: Load) => {
     const files = e.target.files;
-    if (!files) return;
-    
+    if (!files || files.length === 0) return;
     setUploading(true);
     try {
       for (const file of Array.from(files)) {
-        const fileName = `${load.id}/${Date.now()}.${file.name.split('.').pop()}`;
+        const fileName = `${load.id}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
         await supabase.storage.from('pod-documents').upload(fileName, file);
         const { data: urlData } = supabase.storage.from('pod-documents').getPublicUrl(fileName);
         await supabase.from('pod_documents').insert({
@@ -376,20 +377,31 @@ const DriverDashboard: React.FC = () => {
           file_url: urlData.publicUrl,
           file_type: file.type,
         });
-        
         setUploadedFiles(prev => ({
           ...prev,
-          [load.id]: [...(prev[load.id] || []), file.name]
+          [load.id]: [...(prev[load.id] || []), file.name],
         }));
       }
+      // Reset the input so the same file can be re-selected if needed
+      e.target.value = '';
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('Failed to upload file. Please try again.');
+    } finally {
+      setUploading(false);
+    }
+  };
 
+  // Step 2: finalize — create invoice, send email, update statuses
+  const handleSubmitPod = async (load: Load) => {
+    setSubmittingPod(true);
+    try {
       await supabase
         .from('loads')
         .update({ status: 'DELIVERED', delivered_at: new Date().toISOString() })
         .eq('id', load.id);
 
       const invoiceNumber = await generateNextInvoiceNumber();
-
       await supabase.from('invoices').insert({
         invoice_number: invoiceNumber,
         load_id: load.id,
@@ -414,34 +426,30 @@ const DriverDashboard: React.FC = () => {
           const errText = await emailRes.text();
           console.error('Auto-email failed:', errText);
         } else {
-          console.log('Invoice email auto-sent after POD upload');
+          console.log('Invoice email auto-sent after POD submit');
         }
       } catch (emailErr) {
         console.error('Auto-email request failed:', emailErr);
-        // Non-fatal — POD is uploaded and invoice is created regardless
       }
 
-      // Record departed timestamp for delivery stops that don't have one yet (POD = proof of departure)
+      // Record departed timestamp for delivery stops
       for (const stop of stopsRef.current.filter(s => s.stop_type === 'delivery')) {
         await saveGeofenceTimestamp(load.id, stop.id, 'delivery', 'departed', null, null, 'pod_upload');
       }
 
-      // Release the driver back to available after POD upload
-      // Driver should be freed up once delivery is confirmed, not waiting for payment
+      // Release driver back to available
       if (user?.driver_id) {
-        await supabase
-          .from('drivers')
-          .update({ status: 'available' })
-          .eq('id', user.driver_id);
-        console.log('Driver released to available after POD upload (DriverDashboard)');
+        await supabase.from('drivers').update({ status: 'available' }).eq('id', user.driver_id);
       }
 
+      setSelectedLoad(prev => prev?.id === load.id ? { ...prev, status: 'INVOICED' } : prev);
+      setLoads(prev => prev.map(l => l.id === load.id ? { ...l, status: 'INVOICED' } : l));
       fetchDriverData();
     } catch (error) {
-      console.error('Error uploading POD:', error);
-      alert('Failed to upload document');
+      console.error('Error submitting POD:', error);
+      alert('Failed to submit POD. Please try again.');
     } finally {
-      setUploading(false);
+      setSubmittingPod(false);
     }
   };
 
@@ -1011,51 +1019,78 @@ const DriverDashboard: React.FC = () => {
 
               {/* Upload POD Documents */}
               <div className="bg-white rounded-2xl shadow-lg p-6">
-                <h2 className="text-lg font-bold text-slate-800 mb-4">Upload POD Documents</h2>
-                
+                <h2 className="text-lg font-bold text-slate-800 mb-1">Upload POD Documents</h2>
+                <p className="text-sm text-slate-500 mb-4">Upload all photos first, then tap <strong>Submit POD &amp; Send Invoice</strong> when done.</p>
+
                 {uploadedFiles[selectedLoad.id]?.length > 0 && (
-                  <div className="mb-6 space-y-2">
+                  <div className="mb-4 space-y-2">
                     {uploadedFiles[selectedLoad.id].map((file, i) => (
                       <div key={i} className="flex items-center gap-3 p-3 bg-emerald-50 rounded-lg border border-emerald-200">
-                        <FileText className="w-5 h-5 text-emerald-600" />
-                        <span className="text-sm font-medium text-emerald-700">{file}</span>
-                        <CheckCircle className="w-4 h-4 text-emerald-600 ml-auto" />
+                        <FileText className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                        <span className="text-sm font-medium text-emerald-700 truncate">{file}</span>
+                        <CheckCircle className="w-4 h-4 text-emerald-600 ml-auto flex-shrink-0" />
                       </div>
                     ))}
                   </div>
                 )}
 
-                <label className="block">
+                {/* Upload button — can tap multiple times */}
+                <label className="block mb-4">
                   <input
                     type="file"
                     multiple
                     accept="image/*,.pdf"
                     onChange={(e) => handleFileUpload(e, selectedLoad)}
-                    disabled={uploading}
+                    disabled={uploading || submittingPod}
                     className="hidden"
                   />
-                  <div className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
+                  <div className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${
                     uploading ? 'border-slate-200 bg-slate-50' : 'border-blue-300 hover:border-blue-400 hover:bg-blue-50'
                   }`}>
                     {uploading ? (
                       <div className="flex flex-col items-center gap-3">
-                        <Loader2 className="w-10 h-10 animate-spin text-blue-600" />
-                        <span className="text-slate-600">Uploading...</span>
+                        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                        <span className="text-slate-600 font-medium">Uploading...</span>
                       </div>
                     ) : (
-                      <div className="flex flex-col items-center gap-3">
+                      <div className="flex flex-col items-center gap-2">
                         <div className="flex gap-2">
-                          <Camera className="w-8 h-8 text-blue-500" />
-                          <Upload className="w-8 h-8 text-blue-500" />
+                          <Camera className="w-7 h-7 text-blue-500" />
+                          <Upload className="w-7 h-7 text-blue-500" />
                         </div>
-                        <div>
-                          <p className="font-semibold text-slate-700">Tap to upload documents</p>
-                          <p className="text-sm text-slate-500 mt-1">Photos, PDFs, or scanned documents</p>
-                        </div>
+                        <p className="font-semibold text-slate-700">
+                          {uploadedFiles[selectedLoad.id]?.length > 0 ? 'Tap to add more photos' : 'Tap to upload documents'}
+                        </p>
+                        <p className="text-xs text-slate-500">Photos, PDFs, or scanned documents</p>
                       </div>
                     )}
                   </div>
                 </label>
+
+                {/* Submit button — only shown after at least one file is uploaded */}
+                {(uploadedFiles[selectedLoad.id]?.length ?? 0) > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleSubmitPod(selectedLoad)}
+                    disabled={uploading || submittingPod}
+                    className="w-full py-4 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl font-bold text-base hover:from-emerald-600 hover:to-green-700 flex items-center justify-center gap-3 disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-md"
+                  >
+                    {submittingPod ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Submitting & Sending Invoice...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-5 h-5" />
+                        Submit POD &amp; Send Invoice
+                        <span className="text-emerald-200 text-sm font-normal">
+                          ({uploadedFiles[selectedLoad.id]?.length} file{uploadedFiles[selectedLoad.id]?.length !== 1 ? 's' : ''})
+                        </span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             </>
           )}

@@ -8,6 +8,24 @@ const { combinePDFs } = require('./combinePDFs');
 require('dotenv').config();
 
 /**
+ * Sanitize a value for use with pdf-lib StandardFonts (WinAnsiEncoding / Latin-1).
+ * Replaces common Unicode punctuation with ASCII equivalents, removes anything
+ * outside the printable Latin-1 range that would throw inside page.drawText().
+ */
+function sanitizeText(val) {
+  if (val === null || val === undefined) return '';
+  return String(val)
+    .replace(/[\u2018\u2019\u201A\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u2033]/g, '"')
+    .replace(/\u2013/g, '-')
+    .replace(/\u2014/g, '--')
+    .replace(/\u2026/g, '...')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[\u2022\u2023\u2043]/g, '*')
+    .replace(/[^\x20-\x7E\xA0-\xFF]/g, ''); // strip anything outside printable Latin-1
+}
+
+/**
  * Generate a clean, text-based invoice PDF server-side using pdf-lib.
  * Used when the frontend doesn't supply pdfBase64 (e.g. auto-send on POD upload).
  */
@@ -30,7 +48,7 @@ async function generateServerInvoicePdf(load, invoice, customer, companyName) {
 
   // ── Header bar ──────────────────────────────────────────────────────────
   page.drawRectangle({ x: left, y: y - 4, width: right - left, height: 36, color: blue });
-  page.drawText(companyName || 'GO 4 Farms & Cattle', {
+  page.drawText(sanitizeText(companyName || 'GO 4 Farms & Cattle'), {
     x: left + 10, y: y + 6, size: 16, font: bold, color: rgb(1, 1, 1),
   });
   page.drawText(`INVOICE`, {
@@ -43,10 +61,10 @@ async function generateServerInvoicePdf(load, invoice, customer, companyName) {
     ? new Date(invoice.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
     : new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-  page.drawText(`Invoice #: ${invoice.invoice_number}`, { x: left, y, size: 11, font: bold, color: black });
-  page.drawText(`Date: ${invoiceDate}`, { x: right - 140, y, size: 10, font: regular, color: black });
+  page.drawText(sanitizeText(`Invoice #: ${invoice.invoice_number}`), { x: left, y, size: 11, font: bold, color: black });
+  page.drawText(sanitizeText(`Date: ${invoiceDate}`), { x: right - 140, y, size: 10, font: regular, color: black });
   y -= 18;
-  page.drawText(`Load #: ${load.load_number || '—'}`, { x: left, y, size: 10, font: regular, color: grey });
+  page.drawText(sanitizeText(`Load #: ${load.load_number || '-'}`), { x: left, y, size: 10, font: regular, color: grey });
   y -= 28;
 
   // ── Divider ──────────────────────────────────────────────────────────────
@@ -56,19 +74,19 @@ async function generateServerInvoicePdf(load, invoice, customer, companyName) {
   // ── Bill To ──────────────────────────────────────────────────────────────
   page.drawText('BILL TO', { x: left, y, size: 9, font: bold, color: grey });
   y -= 14;
-  page.drawText(customer.name || '—', { x: left, y, size: 11, font: bold, color: black });
+  page.drawText(sanitizeText(customer.name || '-'), { x: left, y, size: 11, font: bold, color: black });
   y -= 14;
   if (customer.address) {
-    page.drawText(customer.address, { x: left, y, size: 10, font: regular, color: black });
+    page.drawText(sanitizeText(customer.address), { x: left, y, size: 10, font: regular, color: black });
     y -= 14;
   }
   const cityLine = [customer.city, customer.state, customer.zip].filter(Boolean).join(', ');
   if (cityLine) {
-    page.drawText(cityLine, { x: left, y, size: 10, font: regular, color: black });
+    page.drawText(sanitizeText(cityLine), { x: left, y, size: 10, font: regular, color: black });
     y -= 14;
   }
   if (customer.pod_email || customer.email) {
-    page.drawText(customer.pod_email || customer.email, { x: left, y, size: 9, font: regular, color: grey });
+    page.drawText(sanitizeText(customer.pod_email || customer.email), { x: left, y, size: 9, font: regular, color: grey });
     y -= 14;
   }
   y -= 16;
@@ -76,9 +94,9 @@ async function generateServerInvoicePdf(load, invoice, customer, companyName) {
   // ── Route ────────────────────────────────────────────────────────────────
   page.drawLine({ start: { x: left, y }, end: { x: right, y }, thickness: 0.5, color: lightGrey });
   y -= 16;
-  const origin = [load.origin_city, load.origin_state].filter(Boolean).join(', ') || '—';
-  const dest = [load.dest_city, load.dest_state].filter(Boolean).join(', ') || '—';
-  page.drawText(`Route: ${origin}  →  ${dest}`, { x: left, y, size: 10, font: regular, color: black });
+  const origin = sanitizeText([load.origin_city, load.origin_state].filter(Boolean).join(', ') || '-');
+  const dest = sanitizeText([load.dest_city, load.dest_state].filter(Boolean).join(', ') || '-');
+  page.drawText(`Route: ${origin}  ->  ${dest}`, { x: left, y, size: 10, font: regular, color: black });
   y -= 22;
 
   // ── Charges table header ─────────────────────────────────────────────────
@@ -98,8 +116,8 @@ async function generateServerInvoicePdf(load, invoice, customer, companyName) {
   if (load.detention_pay) rows.push(['Detention Pay', load.detention_pay]);
 
   for (const [desc, amt] of rows) {
-    page.drawText(desc, { x: left + 8, y, size: 10, font: regular, color: black });
-    page.drawText(fmt(amt), { x: right - 70, y, size: 10, font: regular, color: black });
+    page.drawText(sanitizeText(desc), { x: left + 8, y, size: 10, font: regular, color: black });
+    page.drawText(sanitizeText(fmt(amt)), { x: right - 70, y, size: 10, font: regular, color: black });
     y -= 18;
   }
 
@@ -575,13 +593,11 @@ app.post('/api/send-invoice-email', async (req, res) => {
       attachments
     });
 
-    // Update invoice status to SENT
+    // Update invoice status to SENT — emailed_at drives the "Waiting On Payment" bucket
+    const now = new Date().toISOString();
     await supabase
       .from('invoices')
-      .update({ 
-        status: 'SENT',
-        sent_at: new Date().toISOString()
-      })
+      .update({ status: 'SENT', sent_at: now, emailed_at: now })
       .eq('id', invoice.id);
 
     console.log('[Invoice Email] Success!');
