@@ -29,7 +29,7 @@ function sanitizeText(val) {
  * Generate a clean, text-based invoice PDF server-side using pdf-lib.
  * Used when the frontend doesn't supply pdfBase64 (e.g. auto-send on POD upload).
  */
-async function generateServerInvoicePdf(load, invoice, customer, companyName) {
+async function generateServerInvoicePdf(load, invoice, customer, companyName, geoTimestamps = []) {
   const doc = await PDFDocument.create();
   const page = doc.addPage([612, 792]); // US Letter
   const { width, height } = page.getSize();
@@ -130,6 +130,48 @@ async function generateServerInvoicePdf(load, invoice, customer, companyName) {
   page.drawText('TOTAL DUE', { x: left + 10, y: y + 4, size: 11, font: bold, color: rgb(1, 1, 1) });
   page.drawText(fmt(invoice.amount), { x: right - 80, y: y + 4, size: 13, font: bold, color: rgb(1, 1, 1) });
   y -= 44;
+
+  // ── GPS Timestamps ────────────────────────────────────────────────────────
+  if (geoTimestamps && geoTimestamps.length > 0) {
+    y -= 8;
+    page.drawLine({ start: { x: left, y }, end: { x: right, y }, thickness: 0.5, color: lightGrey });
+    y -= 14;
+    page.drawText('GPS VERIFIED TIMESTAMPS', { x: left, y, size: 9, font: bold, color: grey });
+    y -= 14;
+
+    const fmtTs = (ts) => {
+      if (!ts) return '-';
+      const d = new Date(ts);
+      return d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+    };
+
+    const stopOrder = ['pickup', 'extra_stop', 'delivery'];
+    const byStop = {};
+    for (const t of geoTimestamps) {
+      const key = t.stop_id || t.stop_type || 'general';
+      if (!byStop[key]) byStop[key] = { stop_type: t.stop_type, events: [] };
+      byStop[key].events.push(t);
+    }
+
+    const stopGroups = Object.values(byStop).sort((a, b) =>
+      (stopOrder.indexOf(a.stop_type) - stopOrder.indexOf(b.stop_type))
+    );
+
+    for (const group of stopGroups) {
+      const label = group.stop_type === 'pickup' ? 'Pickup' : group.stop_type === 'delivery' ? 'Delivery' : 'Stop';
+      const arrived = group.events.find(e => e.event_type === 'arrived');
+      const departed = group.events.find(e => e.event_type === 'departed');
+      page.drawText(sanitizeText(`${label}:`), { x: left + 8, y, size: 9, font: bold, color: black });
+      if (arrived) {
+        page.drawText(sanitizeText(`In: ${fmtTs(arrived.timestamp)}${arrived.verified ? ' (GPS)' : ''}`), { x: left + 70, y, size: 9, font: regular, color: black });
+      }
+      if (departed) {
+        page.drawText(sanitizeText(`Out: ${fmtTs(departed.timestamp)}${departed.verified ? ' (GPS)' : ''}`), { x: left + 280, y, size: 9, font: regular, color: black });
+      }
+      y -= 14;
+    }
+    y -= 6;
+  }
 
   // ── Payment terms ─────────────────────────────────────────────────────────
   page.drawText('Payment due within 30 days. Thank you for your business!', {
@@ -475,6 +517,13 @@ app.post('/api/send-invoice-email', async (req, res) => {
       });
     }
 
+    // Fetch GPS timestamps for this load
+    const { data: geoTimestamps } = await supabase
+      .from('geofence_timestamps')
+      .select('*')
+      .eq('load_id', load_id)
+      .order('timestamp', { ascending: true });
+
     // Validate customer email
     if (!primaryEmail) {
       return res.status(400).json({ 
@@ -555,7 +604,7 @@ app.post('/api/send-invoice-email', async (req, res) => {
       // Generate a clean invoice PDF server-side, then combine with any POD images.
       console.log('[Invoice Email] No pdfBase64 — generating server-side invoice PDF');
       try {
-        const invoiceBuf = await generateServerInvoicePdf(load, invoice, customer, companyName);
+        const invoiceBuf = await generateServerInvoicePdf(load, invoice, customer, companyName, geoTimestamps || []);
 
         if (podFiles.length > 0) {
           const allFiles = [
