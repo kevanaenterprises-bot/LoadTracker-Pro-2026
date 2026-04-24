@@ -241,7 +241,20 @@ const DriverDashboard: React.FC = () => {
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       async (pos) => {
-        const { latitude: dLat, longitude: dLng } = pos.coords;
+        const { latitude: dLat, longitude: dLng, speed, heading } = pos.coords;
+
+        // Write position to drivers table so live tracking map can see this driver
+        if (user?.driver_id) {
+          supabase.from('drivers').update({
+            last_known_lat: dLat,
+            last_known_lng: dLng,
+            last_position_update: new Date().toISOString(),
+            last_known_speed: speed ? Math.round(speed * 2.237) : null, // m/s → mph
+            last_known_heading: heading ?? null,
+            status: 'on_route',
+          }).eq('id', user.driver_id).then(() => {});
+        }
+
         for (const stop of stopsRef.current) {
           const sLat = stop.location?.latitude;
           const sLng = stop.location?.longitude;
@@ -272,7 +285,7 @@ const DriverDashboard: React.FC = () => {
         }
       },
       (err) => console.warn('Geofence watch error:', err),
-      { enableHighAccuracy: true, maximumAge: 30000, timeout: 30000 }
+      { enableHighAccuracy: true, maximumAge: 15000, timeout: 30000 }
     );
   };
 
