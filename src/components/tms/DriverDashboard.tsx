@@ -47,6 +47,16 @@ const DriverDashboard: React.FC = () => {
   const [savingFuel, setSavingFuel] = useState(false);
   const [fuelSaved, setFuelSaved] = useState(false);
 
+  // Historical marker tour state
+  const [markerTourEnabled, setMarkerTourEnabled] = useState(() => localStorage.getItem('lt_marker_tour') !== 'false');
+  const [voicePreference, setVoicePreference] = useState<'male' | 'female'>(() =>
+    (localStorage.getItem('lt_voice_pref') as 'male' | 'female') || 'female'
+  );
+  const [lastAnnouncedMarker, setLastAnnouncedMarker] = useState<string | null>(null);
+  const announcedMarkersRef = useRef<Set<string>>(new Set());
+  const markerCacheRef = useRef<Map<string, any[]>>(new Map());
+  const lastMarkerFetchCellRef = useRef<string>('');
+
   useEffect(() => {
     if (user?.driver_id) {
       fetchDriverData();
@@ -231,6 +241,111 @@ const DriverDashboard: React.FC = () => {
     }
   };
 
+  // ── Historical Marker Tour ────────────────────────────────────────────────
+
+  const getGridCell = (lat: number, lng: number) =>
+    `${Math.floor(lat * 10)},${Math.floor(lng * 10)}`; // ~11km cells
+
+  const fetchNearbyMarkers = async (lat: number, lng: number): Promise<any[]> => {
+    const cell = getGridCell(lat, lng);
+    if (markerCacheRef.current.has(cell)) return markerCacheRef.current.get(cell)!;
+
+    try {
+      const query = `
+        [out:json][timeout:15];
+        (
+          node["historic"="wayside"](around:600,${lat},${lng});
+          node["historic"="memorial"](around:600,${lat},${lng});
+          node["historic"="monument"](around:600,${lat},${lng});
+          node["historic"="milestone"](around:600,${lat},${lng});
+          node["tourism"="information"]["information"="board"](around:600,${lat},${lng});
+          node["information"="guidepost"]["historic"](around:600,${lat},${lng});
+        );
+        out body;
+      `.trim();
+
+      const res = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        body: query,
+        headers: { 'Content-Type': 'text/plain' },
+      });
+
+      if (!res.ok) return [];
+      const data = await res.json();
+      const markers = (data.elements || []).filter((el: any) =>
+        el.lat && el.lon && (el.tags?.name || el.tags?.inscription || el.tags?.description)
+      );
+      markerCacheRef.current.set(cell, markers);
+      return markers;
+    } catch {
+      return [];
+    }
+  };
+
+  const speakMarker = (marker: any, voice: 'male' | 'female') => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel(); // stop anything already playing
+
+    const name = marker.tags?.name || 'Historical Marker';
+    const inscription = marker.tags?.inscription || marker.tags?.description || '';
+    const text = inscription
+      ? `Historical marker: ${name}. ${inscription}`
+      : `Historical marker ahead: ${name}.`;
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.92;
+    utterance.pitch = voice === 'female' ? 1.1 : 0.85;
+    utterance.volume = 1;
+
+    // Pick a matching voice if available
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find(v => {
+      const n = v.name.toLowerCase();
+      return voice === 'female'
+        ? (n.includes('samantha') || n.includes('female') || n.includes('zira') || n.includes('victoria') || n.includes('karen'))
+        : (n.includes('alex') || n.includes('male') || n.includes('david') || n.includes('daniel') || n.includes('fred'));
+    });
+    if (preferred) utterance.voice = preferred;
+
+    window.speechSynthesis.speak(utterance);
+    setLastAnnouncedMarker(name);
+    setTimeout(() => setLastAnnouncedMarker(null), 8000);
+  };
+
+  const checkNearbyMarkers = async (lat: number, lng: number) => {
+    if (!markerTourEnabled) return;
+
+    const cell = getGridCell(lat, lng);
+    if (cell === lastMarkerFetchCellRef.current) {
+      // Already fetched for this cell — just check distances against cache
+      const cached = markerCacheRef.current.get(cell) || [];
+      for (const marker of cached) {
+        const dist = getDistanceMeters(lat, lng, marker.lat, marker.lon);
+        const key = `marker-${marker.id}`;
+        if (dist <= 50 && !announcedMarkersRef.current.has(key)) {
+          announcedMarkersRef.current.add(key);
+          speakMarker(marker, voicePreference);
+          break; // one at a time
+        }
+      }
+      return;
+    }
+
+    lastMarkerFetchCellRef.current = cell;
+    const markers = await fetchNearbyMarkers(lat, lng);
+    for (const marker of markers) {
+      const dist = getDistanceMeters(lat, lng, marker.lat, marker.lon);
+      const key = `marker-${marker.id}`;
+      if (dist <= 50 && !announcedMarkersRef.current.has(key)) {
+        announcedMarkersRef.current.add(key);
+        speakMarker(marker, voicePreference);
+        break;
+      }
+    }
+  };
+
+  // ── End Historical Marker Tour ────────────────────────────────────────────
+
   // Start GPS watchPosition auto-geofencing for the active load
   const startAutoGeofencing = (loadId: string) => {
     if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
@@ -242,6 +357,9 @@ const DriverDashboard: React.FC = () => {
     watchIdRef.current = navigator.geolocation.watchPosition(
       async (pos) => {
         const { latitude: dLat, longitude: dLng, speed, heading } = pos.coords;
+
+        // Check for nearby historical markers and announce via TTS
+        checkNearbyMarkers(dLat, dLng);
 
         // Write position to drivers table so live tracking map can see this driver
         if (user?.driver_id) {
@@ -646,6 +764,75 @@ const DriverDashboard: React.FC = () => {
                   <h2 className="text-lg font-bold">Load Accepted</h2>
                 </div>
                 <p className="text-emerald-100">Use the GPS tracking buttons below to record your arrival and departure at each location.</p>
+              </div>
+
+              {/* Historical Marker Tour Controls */}
+              <div className="bg-white rounded-2xl shadow-lg p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">🏛️</span>
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-sm">Historical Marker Tour</h3>
+                      <p className="text-xs text-slate-500">Voice announces markers as you pass</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !markerTourEnabled;
+                      setMarkerTourEnabled(next);
+                      localStorage.setItem('lt_marker_tour', String(next));
+                      if (!next) window.speechSynthesis?.cancel();
+                    }}
+                    className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${
+                      markerTourEnabled ? 'bg-blue-600' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                      markerTourEnabled ? 'translate-x-6' : 'translate-x-1'
+                    }`} />
+                  </button>
+                </div>
+
+                {markerTourEnabled && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-xs text-slate-500 font-medium">Voice:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setVoicePreference('female');
+                        localStorage.setItem('lt_voice_pref', 'female');
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                        voicePreference === 'female'
+                          ? 'bg-pink-100 text-pink-700 border border-pink-300'
+                          : 'bg-slate-100 text-slate-500'
+                      }`}
+                    >
+                      👩 Female
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setVoicePreference('male');
+                        localStorage.setItem('lt_voice_pref', 'male');
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                        voicePreference === 'male'
+                          ? 'bg-blue-100 text-blue-700 border border-blue-300'
+                          : 'bg-slate-100 text-slate-500'
+                      }`}
+                    >
+                      👨 Male
+                    </button>
+
+                    {lastAnnouncedMarker && (
+                      <span className="ml-auto text-xs text-emerald-600 font-medium animate-pulse">
+                        🔊 {lastAnnouncedMarker}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* GPS Status Message */}
