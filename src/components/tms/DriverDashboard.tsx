@@ -4,11 +4,17 @@ import { generateNextInvoiceNumber } from '@/lib/invoiceUtils';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { Load, Driver, LoadStop, GeofenceTimestamp } from '@/types/tms';
-import { 
-  Truck, MapPin, Calendar, Package, CheckCircle, Upload, 
+import {
+  Truck, MapPin, Calendar, Package, CheckCircle, Upload,
   FileText, Loader2, Camera, LogOut, RefreshCw, Clock,
-  Navigation, Phone, User, ChevronRight, ShieldCheck, AlertCircle
+  Navigation, Phone, User, ChevronRight, ShieldCheck, AlertCircle, Fuel
 } from 'lucide-react';
+
+const US_STATES = [
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
+  'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
+  'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'
+];
 
 const DriverDashboard: React.FC = () => {
   const { user, logout } = useAuth();
@@ -27,6 +33,15 @@ const DriverDashboard: React.FC = () => {
   const watchIdRef = useRef<number | null>(null);
   const autoTriggeredRef = useRef<Set<string>>(new Set());
   const stopsRef = useRef<LoadStop[]>([]);
+
+  // Fuel entry state
+  const [fuelState, setFuelState] = useState('');
+  const [fuelGallons, setFuelGallons] = useState('');
+  const [fuelPPG, setFuelPPG] = useState('');
+  const [fuelTotal, setFuelTotal] = useState('');
+  const [fuelVendor, setFuelVendor] = useState('');
+  const [savingFuel, setSavingFuel] = useState(false);
+  const [fuelSaved, setFuelSaved] = useState(false);
 
   useEffect(() => {
     if (user?.driver_id) {
@@ -255,6 +270,49 @@ const DriverDashboard: React.FC = () => {
       (err) => console.warn('Geofence watch error:', err),
       { enableHighAccuracy: true, maximumAge: 30000, timeout: 30000 }
     );
+  };
+
+  const handleSaveFuel = async () => {
+    if (!fuelState || !fuelGallons) {
+      alert('Please enter at least the state and gallons.');
+      return;
+    }
+    setSavingFuel(true);
+    try {
+      const now = new Date();
+      const quarter = Math.ceil((now.getMonth() + 1) / 3);
+      const year = now.getFullYear();
+      const truckNum = driver?.truck_number || 'UNKNOWN';
+      const gallons = parseFloat(fuelGallons);
+      const ppg = fuelPPG ? parseFloat(fuelPPG) : null;
+      const total = fuelTotal ? parseFloat(fuelTotal) : (ppg && gallons ? Math.round(ppg * gallons * 100) / 100 : null);
+
+      const { error } = await supabase.from('ifta_fuel_purchases').insert({
+        truck_number: truckNum,
+        quarter,
+        year,
+        purchase_date: now.toISOString().split('T')[0],
+        state: fuelState,
+        gallons,
+        price_per_gallon: ppg,
+        total_cost: total,
+        vendor: fuelVendor.trim() || null,
+      });
+      if (error) throw error;
+
+      // Reset form
+      setFuelState('');
+      setFuelGallons('');
+      setFuelPPG('');
+      setFuelTotal('');
+      setFuelVendor('');
+      setFuelSaved(true);
+      setTimeout(() => setFuelSaved(false), 3000);
+    } catch (err: any) {
+      alert('Failed to save fuel entry: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setSavingFuel(false);
+    }
   };
 
   const getTimestamp = (stopId: string | null, stopType: string, eventType: string): GeofenceTimestamp | undefined => {
@@ -828,6 +886,107 @@ const DriverDashboard: React.FC = () => {
                     <ShieldCheck className="w-4 h-4 text-blue-500 flex-shrink-0" />
                     GPS coordinates are recorded automatically and verified against location geofences for legally verifiable timestamps.
                   </p>
+                </div>
+              </div>
+
+              {/* Fuel Entry — feeds IFTA reporting */}
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 bg-amber-100 rounded-xl">
+                    <Fuel className="w-5 h-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-800">Log Fuel Stop</h2>
+                    <p className="text-xs text-slate-500">Auto-saved to IFTA quarterly report</p>
+                  </div>
+                </div>
+
+                {fuelSaved && (
+                  <div className="mb-4 flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                    <CheckCircle className="w-4 h-4 text-emerald-600" />
+                    <span className="text-sm font-medium text-emerald-700">Fuel entry saved to IFTA!</span>
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  {/* State + Gallons */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">State *</label>
+                      <select
+                        value={fuelState}
+                        onChange={e => setFuelState(e.target.value)}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-3 text-sm focus:ring-2 focus:ring-amber-400 focus:border-amber-400 bg-white"
+                      >
+                        <option value="">State...</option>
+                        {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Gallons *</label>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        value={fuelGallons}
+                        onChange={e => setFuelGallons(e.target.value)}
+                        placeholder="0.000"
+                        step="0.001"
+                        min="0"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-3 text-sm focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Price per gallon + Total */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Price / Gal</label>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        value={fuelPPG}
+                        onChange={e => setFuelPPG(e.target.value)}
+                        placeholder="$0.000"
+                        step="0.001"
+                        min="0"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-3 text-sm focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">Total Cost</label>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        value={fuelTotal}
+                        onChange={e => setFuelTotal(e.target.value)}
+                        placeholder="$0.00"
+                        step="0.01"
+                        min="0"
+                        className="w-full border border-slate-300 rounded-xl px-3 py-3 text-sm focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Vendor */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Station / Vendor</label>
+                    <input
+                      type="text"
+                      value={fuelVendor}
+                      onChange={e => setFuelVendor(e.target.value)}
+                      placeholder="e.g. Pilot, Love's, Flying J"
+                      className="w-full border border-slate-300 rounded-xl px-3 py-3 text-sm focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleSaveFuel}
+                    disabled={savingFuel || !fuelState || !fuelGallons}
+                    className="w-full bg-amber-500 hover:bg-amber-600 text-white rounded-xl py-3.5 text-sm font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {savingFuel ? <Loader2 className="w-4 h-4 animate-spin" /> : <Fuel className="w-4 h-4" />}
+                    {savingFuel ? 'Saving...' : 'Save Fuel Entry'}
+                  </button>
                 </div>
               </div>
 
