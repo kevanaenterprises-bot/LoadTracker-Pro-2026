@@ -673,6 +673,37 @@ app.post('/api/send-invoice-email', async (req, res) => {
   }
 });
 
+// Driver refused / released a load — notify dispatcher via email
+app.post('/api/driver-refused-load', async (req, res) => {
+  const { load_id, load_number, driver_name } = req.body;
+  if (!load_id) return res.status(400).json({ error: 'Missing load_id' });
+
+  try {
+    const { data: settings } = await supabase
+      .from('settings')
+      .select('key, value')
+      .in('key', ['invoice_notification_email', 'company_name']);
+
+    const dispatchEmail = settings?.find(s => s.key === 'invoice_notification_email')?.value || 'kevin@go4fc.com';
+    const companyName = settings?.find(s => s.key === 'company_name')?.value || 'GO 4 Farms & Cattle';
+
+    const { sendInvoiceEmail } = require('./sendInvoiceEmail');
+    await sendInvoiceEmail({
+      to: dispatchEmail,
+      cc: ['gofarmsbills@gmail.com'],
+      subject: `⚠️ Driver Released Load ${load_number} — ${companyName}`,
+      text: `Driver ${driver_name || 'Unknown'} has released load ${load_number}.\n\nThe load has been returned to PENDING status and needs to be reassigned.\n\nLog in to LoadTracker Pro to reassign the load.`,
+      attachments: [],
+    });
+
+    console.log(`[Driver Refused] Load ${load_number} released by ${driver_name}, notified ${dispatchEmail}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Driver Refused] Notification failed:', err);
+    res.status(500).json({ error: 'Notification failed' });
+  }
+});
+
 // SPA fallback - serve React index.html for all non-API routes
 // This must come AFTER all API routes (/api/*)
 app.get('*', (req, res) => {
