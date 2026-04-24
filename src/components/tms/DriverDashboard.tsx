@@ -26,6 +26,8 @@ const DriverDashboard: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [submittingPod, setSubmittingPod] = useState(false);
   const [bolNumber, setBolNumber] = useState('');
+  const [extraStopFee, setExtraStopFee] = useState('');
+  const [lumperFee, setLumperFee] = useState('');
   const [uploadedFiles, setUploadedFiles] = useState<{ [loadId: string]: string[] }>({});
   const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
   const [stops, setStops] = useState<LoadStop[]>([]);
@@ -401,22 +403,26 @@ const DriverDashboard: React.FC = () => {
     }
     setSubmittingPod(true);
     try {
-      // Save BOL # to the load first
+      // Save BOL #, fees, and status to load
+      const extraStop = parseFloat(extraStopFee) || 0;
+      const lumper = parseFloat(lumperFee) || 0;
       await supabase
         .from('loads')
-        .update({ bol_number: bolNumber.trim() })
+        .update({
+          bol_number: bolNumber.trim(),
+          extra_stop_fee: extraStop || null,
+          lumper_fee: lumper || null,
+          status: 'DELIVERED',
+          delivered_at: new Date().toISOString(),
+        })
         .eq('id', load.id);
 
-      await supabase
-        .from('loads')
-        .update({ status: 'DELIVERED', delivered_at: new Date().toISOString() })
-        .eq('id', load.id);
-
+      const invoiceAmount = (parseFloat(String(load.rate)) || 0) + extraStop + lumper;
       const invoiceNumber = await generateNextInvoiceNumber();
       await supabase.from('invoices').insert({
         invoice_number: invoiceNumber,
         load_id: load.id,
-        amount: load.rate,
+        amount: invoiceAmount,
         status: 'PENDING',
       });
 
@@ -1028,14 +1034,14 @@ const DriverDashboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* BOL # — required before submit */}
+              {/* BOL # + Fees — required before upload */}
               <div className="bg-white rounded-2xl shadow-lg p-6">
                 <div className="flex items-center gap-2 mb-3">
                   <FileText className="w-5 h-5 text-blue-600" />
                   <h2 className="text-lg font-bold text-slate-800">BOL Number</h2>
                   <span className="text-xs bg-red-100 text-red-600 font-semibold px-2 py-0.5 rounded-full">Required</span>
                 </div>
-                <p className="text-sm text-slate-500 mb-3">Enter the Bill of Lading number from your paperwork. This is required before submitting.</p>
+                <p className="text-sm text-slate-500 mb-3">Enter the Bill of Lading number from your paperwork. Required before uploading documents.</p>
                 <input
                   type="text"
                   value={bolNumber}
@@ -1048,6 +1054,42 @@ const DriverDashboard: React.FC = () => {
                       : 'border-slate-300 bg-white focus:border-blue-400'
                   }`}
                 />
+
+                {/* Optional fee fields */}
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Extra Stop Fee <span className="font-normal text-slate-400">(optional)</span></label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-medium">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={extraStopFee}
+                        onChange={(e) => setExtraStopFee(e.target.value)}
+                        placeholder="0.00"
+                        disabled={submittingPod}
+                        className="w-full pl-7 pr-3 py-3 rounded-xl border-2 border-slate-300 text-slate-800 font-medium text-base focus:outline-none focus:border-blue-400 transition-colors"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Lumper Fee <span className="font-normal text-slate-400">(optional)</span></label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-medium">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={lumperFee}
+                        onChange={(e) => setLumperFee(e.target.value)}
+                        placeholder="0.00"
+                        disabled={submittingPod}
+                        className="w-full pl-7 pr-3 py-3 rounded-xl border-2 border-slate-300 text-slate-800 font-medium text-base focus:outline-none focus:border-blue-400 transition-colors"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Upload POD Documents */}
@@ -1074,11 +1116,11 @@ const DriverDashboard: React.FC = () => {
                     multiple
                     accept="image/*,.pdf"
                     onChange={(e) => handleFileUpload(e, selectedLoad)}
-                    disabled={uploading || submittingPod}
+                    disabled={uploading || submittingPod || !bolNumber.trim()}
                     className="hidden"
                   />
                   <div className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${
-                    uploading ? 'border-slate-200 bg-slate-50' : 'border-blue-300 hover:border-blue-400 hover:bg-blue-50'
+                    uploading ? 'border-slate-200 bg-slate-50' : !bolNumber.trim() ? 'border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed' : 'border-blue-300 hover:border-blue-400 hover:bg-blue-50'
                   }`}>
                     {uploading ? (
                       <div className="flex flex-col items-center gap-3">
@@ -1105,7 +1147,7 @@ const DriverDashboard: React.FC = () => {
                   <>
                     {!bolNumber.trim() && (
                       <p className="text-center text-sm text-amber-600 font-medium mb-2">
-                        ⚠️ Enter the BOL # above before submitting
+                        ⚠️ Enter the BOL # above before uploading
                       </p>
                     )}
                     <button
