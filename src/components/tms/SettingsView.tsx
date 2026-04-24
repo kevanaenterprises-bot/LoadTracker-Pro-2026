@@ -23,7 +23,10 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   const [autoInvoiceEnabled, setAutoInvoiceEnabled] = useState(false);
   const [autoEmailEnabled, setAutoEmailEnabled] = useState(true);
   const [loadingSettings, setLoadingSettings] = useState(true);
-  const [invoiceNotificationEmail, setInvoiceNotificationEmail] = useState('kevin@go4fc.com');
+  const [invoiceNotificationEmail, setInvoiceNotificationEmail] = useState('');
+  const [autoCcEmail, setAutoCcEmail] = useState('');
+  const [invoicePrefix, setInvoicePrefix] = useState('');
+  const [invoiceStartNumber, setInvoiceStartNumber] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [toggleSaving, setToggleSaving] = useState<string | null>(null); // which toggle is currently saving
@@ -61,13 +64,16 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
       const { data } = await supabase
         .from('settings')
         .select('key, value')
-        .in('key', ['auto_invoice_enabled', 'auto_email_invoice', 'invoice_notification_email']);
+        .in('key', ['auto_invoice_enabled', 'auto_email_invoice', 'invoice_notification_email', 'auto_cc_email', 'invoice_prefix', 'invoice_start_number']);
 
       if (data) {
         data.forEach(s => {
           if (s.key === 'auto_invoice_enabled') setAutoInvoiceEnabled(s.value === 'true');
           if (s.key === 'auto_email_invoice') setAutoEmailEnabled(s.value === 'true');
-          if (s.key === 'invoice_notification_email') setInvoiceNotificationEmail(s.value || 'kevin@go4fc.com');
+          if (s.key === 'invoice_notification_email') setInvoiceNotificationEmail(s.value || '');
+          if (s.key === 'auto_cc_email') setAutoCcEmail(s.value || '');
+          if (s.key === 'invoice_prefix') setInvoicePrefix(s.value || '');
+          if (s.key === 'invoice_start_number') setInvoiceStartNumber(s.value || '');
         });
       }
       console.log('[Settings] Loaded from DB:', data?.map(s => `${s.key}=${s.value}`).join(', '));
@@ -134,13 +140,16 @@ const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     setSavingSettings(true);
     setSettingsSaved(false);
     try {
-      await supabase
-        .from('settings')
-        .upsert({ key: 'invoice_notification_email', value: invoiceNotificationEmail.trim() }, { onConflict: 'key' });
+      await Promise.all([
+        supabase.from('settings').upsert({ key: 'invoice_notification_email', value: invoiceNotificationEmail.trim() }, { onConflict: 'key' }),
+        supabase.from('settings').upsert({ key: 'auto_cc_email', value: autoCcEmail.trim() }, { onConflict: 'key' }),
+        supabase.from('settings').upsert({ key: 'invoice_prefix', value: invoicePrefix.trim().toUpperCase() }, { onConflict: 'key' }),
+        supabase.from('settings').upsert({ key: 'invoice_start_number', value: invoiceStartNumber.trim() }, { onConflict: 'key' }),
+      ]);
       setSettingsSaved(true);
       setTimeout(() => setSettingsSaved(false), 3000);
     } catch (err) {
-      console.error('Failed to save notification email:', err);
+      console.error('Failed to save settings:', err);
       alert('Failed to save. Please try again.');
     } finally {
       setSavingSettings(false);
@@ -1005,37 +1014,97 @@ CREATE INDEX IF NOT EXISTS idx_loads_customer_id ON loads(customer_id);`;
             <div className="pt-4 border-t border-slate-200">
               <h4 className="font-medium text-slate-800 mb-2 flex items-center gap-2">
                 <Mail className="w-5 h-5 text-slate-600" />
-                Invoice CC Email (Accounting)
+                Invoice CC Email (Primary Accounting)
               </h4>
               <p className="text-sm text-slate-500 mb-3">
-                A confirmation copy of every invoice email is sent to this address for your accounting records.
+                A copy of every invoice email is sent here for your accounting records.
+              </p>
+              <input
+                type="email"
+                value={invoiceNotificationEmail}
+                onChange={(e) => setInvoiceNotificationEmail(e.target.value)}
+                placeholder="accounting@yourcompany.com"
+                className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"
+              />
+            </div>
+
+            {/* Auto-CC Email */}
+            <div className="pt-4 border-t border-slate-200">
+              <h4 className="font-medium text-slate-800 mb-2 flex items-center gap-2">
+                <Mail className="w-5 h-5 text-slate-600" />
+                Invoice CC Email (Secondary — optional)
+              </h4>
+              <p className="text-sm text-slate-500 mb-3">
+                A second inbox to CC on every invoice. Leave blank if not needed.
+              </p>
+              <input
+                type="email"
+                value={autoCcEmail}
+                onChange={(e) => setAutoCcEmail(e.target.value)}
+                placeholder="owner@yourcompany.com"
+                className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"
+              />
+            </div>
+
+            {/* Invoice Numbering */}
+            <div className="pt-4 border-t border-slate-200">
+              <h4 className="font-medium text-slate-800 mb-2 flex items-center gap-2">
+                <FileText className="w-5 h-5 text-slate-600" />
+                Invoice Numbering
+              </h4>
+              <p className="text-sm text-slate-500 mb-3">
+                Set your invoice prefix and starting number. Example: prefix <strong>ABC</strong> + start <strong>1000</strong> → first invoice is <strong>ABC1000</strong>.
               </p>
               <div className="flex gap-3">
-                <input
-                  type="email"
-                  value={invoiceNotificationEmail}
-                  onChange={(e) => setInvoiceNotificationEmail(e.target.value)}
-                  placeholder="kevin@go4fc.com"
-                  className="flex-1 px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"
-                />
-                <button
-                  onClick={handleSaveNotificationEmail}
-                  disabled={savingSettings}
-                  className={`px-6 py-3 rounded-xl font-medium transition-colors flex items-center gap-2 ${
-                    settingsSaved 
-                      ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                      : 'bg-purple-600 text-white hover:bg-purple-700'
-                  } disabled:opacity-50`}
-                >
-                  {savingSettings ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : settingsSaved ? (
-                    <><CheckCircle className="w-5 h-5" />Saved</>
-                  ) : (
-                    'Save'
-                  )}
-                </button>
+                <div className="flex-1">
+                  <label className="text-xs font-semibold text-slate-500 mb-1 block">PREFIX</label>
+                  <input
+                    type="text"
+                    value={invoicePrefix}
+                    onChange={(e) => setInvoicePrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                    placeholder="GO"
+                    maxLength={6}
+                    className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors font-mono uppercase"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs font-semibold text-slate-500 mb-1 block">STARTING NUMBER</label>
+                  <input
+                    type="number"
+                    value={invoiceStartNumber}
+                    onChange={(e) => setInvoiceStartNumber(e.target.value)}
+                    placeholder="1000"
+                    min="1"
+                    className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"
+                  />
+                </div>
               </div>
+              {invoicePrefix && invoiceStartNumber && (
+                <p className="text-xs text-emerald-600 mt-2 font-medium">
+                  ✓ First invoice will be: {invoicePrefix}{invoiceStartNumber}
+                </p>
+              )}
+            </div>
+
+            {/* Save All Button */}
+            <div className="pt-4 border-t border-slate-200">
+              <button
+                onClick={handleSaveNotificationEmail}
+                disabled={savingSettings}
+                className={`w-full px-6 py-3 rounded-xl font-medium transition-colors flex items-center justify-center gap-2 ${
+                  settingsSaved
+                    ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                    : 'bg-purple-600 text-white hover:bg-purple-700'
+                } disabled:opacity-50`}
+              >
+                {savingSettings ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : settingsSaved ? (
+                  <><CheckCircle className="w-5 h-5" />Saved!</>
+                ) : (
+                  'Save Invoice Settings'
+                )}
+              </button>
             </div>
           </div>
         </div>

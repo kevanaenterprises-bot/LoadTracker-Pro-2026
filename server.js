@@ -536,14 +536,15 @@ app.post('/api/send-invoice-email', async (req, res) => {
     const { data: settings } = await supabase
       .from('settings')
       .select('key, value')
-      .in('key', ['invoice_notification_email', 'company_name']);
+      .in('key', ['invoice_notification_email', 'company_name', 'auto_cc_email']);
 
-    const accountingEmail = settings?.find(s => s.key === 'invoice_notification_email')?.value || 'kevin@go4fc.com';
-    const companyName = settings?.find(s => s.key === 'company_name')?.value || 'GO 4 Farms & Cattle';
+    const accountingEmail = settings?.find(s => s.key === 'invoice_notification_email')?.value || '';
+    const companyName = settings?.find(s => s.key === 'company_name')?.value || 'LoadTracker Pro';
+    const autoCcEmail = settings?.find(s => s.key === 'auto_cc_email')?.value || '';
 
     // Prepare email details
     const customerEmail = primaryEmail;
-    const ccEmails = [accountingEmail, 'gofarmsbills@gmail.com'].filter(Boolean);
+    const ccEmails = [accountingEmail, autoCcEmail].filter(Boolean);
     const invoiceNumber = invoice.invoice_number;
     const amount = invoice.amount;
 
@@ -682,15 +683,16 @@ app.post('/api/driver-refused-load', async (req, res) => {
     const { data: settings } = await supabase
       .from('settings')
       .select('key, value')
-      .in('key', ['invoice_notification_email', 'company_name']);
+      .in('key', ['invoice_notification_email', 'company_name', 'auto_cc_email']);
 
-    const dispatchEmail = settings?.find(s => s.key === 'invoice_notification_email')?.value || 'kevin@go4fc.com';
-    const companyName = settings?.find(s => s.key === 'company_name')?.value || 'GO 4 Farms & Cattle';
+    const dispatchEmail = settings?.find(s => s.key === 'invoice_notification_email')?.value || '';
+    const companyName = settings?.find(s => s.key === 'company_name')?.value || 'LoadTracker Pro';
+    const autoCcEmail = settings?.find(s => s.key === 'auto_cc_email')?.value || '';
 
     const { sendInvoiceEmail } = require('./sendInvoiceEmail');
     await sendInvoiceEmail({
       to: dispatchEmail,
-      cc: ['gofarmsbills@gmail.com'],
+      cc: [autoCcEmail].filter(Boolean),
       subject: `⚠️ Driver Released Load ${load_number} — ${companyName}`,
       text: `Driver ${driver_name || 'Unknown'} has released load ${load_number}.\n\nThe load has been returned to PENDING status and needs to be reassigned.\n\nLog in to LoadTracker Pro to reassign the load.`,
       attachments: [],
