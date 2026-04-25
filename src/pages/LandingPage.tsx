@@ -177,7 +177,7 @@ const LandingPage: React.FC = () => {
     { feature: 'Driver Mobile Portal', them: '$30-75/mo extra', us: 'Included' },
     { feature: 'Document Management', them: 'Often extra', us: 'Included' },
     { feature: 'Third-Party Integration', them: '$50-200/mo each', us: '$200 one-time' },
-    { feature: 'Typical Monthly Total', them: '$700-1,200+', us: '$300 flat' },
+    { feature: 'Typical Monthly Total', them: '$700-1,200+', us: '$350 flat' },
   ];
 
   return (
@@ -646,7 +646,7 @@ const LandingPage: React.FC = () => {
                 <p className="text-blue-200">Every feature. Every user. One price.</p>
               </div>
               <div className="text-center mb-8">
-                <span className="text-6xl lg:text-7xl font-extrabold text-white">$300</span>
+                <span className="text-6xl lg:text-7xl font-extrabold text-white">$350</span>
                 <span className="text-blue-200 text-xl">/month</span>
               </div>
               <div className="grid sm:grid-cols-2 gap-3 mb-10">
@@ -922,7 +922,7 @@ const LandingPage: React.FC = () => {
             <div>
               <h4 className="font-bold text-white mb-4">Pricing</h4>
               <ul className="space-y-2 text-sm text-slate-400">
-                <li>All-Inclusive TMS — $300/mo</li>
+                <li>All-Inclusive TMS — $350/mo</li>
                 <li>Unlimited users & seats</li>
                 <li>Every feature included</li>
                 <li>Integrations — $200 one-time</li>

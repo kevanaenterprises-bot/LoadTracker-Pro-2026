@@ -1,9 +1,12 @@
-# Railway build config - skip frontend build, just run the Express backend
+# Railway build config - build frontend then run Express backend
 [phases.setup]
 nixPkgs = ["nodejs_18"]
 
 [phases.install]
-cmds = ["npm install --production"]
+cmds = ["npm install"]
+
+[phases.build]
+cmds = ["npm run build"]
 
 [start]
 cmd = "node server.js"
