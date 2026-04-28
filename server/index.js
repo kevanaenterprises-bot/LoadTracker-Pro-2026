@@ -34,6 +34,16 @@ const pool = new Pool({
   ssl: process.env.DATABASE_URL?.includes('railway') ? { rejectUnauthorized: false } : undefined,
 });
 
+// Auto-create tables that may not exist yet
+pool.query(`
+  CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    token VARCHAR(64) NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  )
+`).catch(err => console.error('[DB] Failed to create password_reset_tokens:', err.message));
+
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
   try {
