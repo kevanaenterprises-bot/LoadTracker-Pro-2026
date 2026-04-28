@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Download, Printer, Loader2, ShieldCheck, MapPin, Fuel, AlertTriangle, RotateCcw, Trash2, ImageOff } from 'lucide-react';
 import { db } from '@/lib/supabaseCompat';
+import { driverSupabase } from '@/lib/supabase';
 import { Load, Invoice, PODDocument, LoadStop, GeofenceTimestamp, CompanySettings, Customer } from '@/types/tms';
 
 interface InvoicePreviewModalProps {
@@ -88,8 +89,8 @@ const InvoicePreviewModal: React.FC<InvoicePreviewModalProps> = ({ isOpen, load,
         setCustomer(null);
       }
 
-      // Fetch POD documents
-      const { data: docs } = await db
+      // Fetch POD documents from driver Supabase (driver app writes there)
+      const { data: docs } = await driverSupabase
         .from('pod_documents')
         .select('*')
         .eq('load_id', load.id);

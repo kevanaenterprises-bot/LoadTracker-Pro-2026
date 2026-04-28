@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { db } from '@/lib/supabaseCompat';
+import { driverSupabase } from '@/lib/supabase';
 import {
   ArrowLeft, RefreshCw, Loader2, MapPin, Truck, Phone,
   Battery, Signal, Clock, Navigation, ChevronLeft, ChevronRight,
@@ -289,8 +290,8 @@ const LiveTrackingView: React.FC<LiveTrackingViewProps> = ({ onBack }) => {
   const fetchDriverLocations = useCallback(async () => {
     console.log('[LiveTracking] Fetching drivers... showAllDrivers=' + showAllDrivers);
     try {
-      // PRIMARY: Direct DB query (edge function has URL parsing issues)
-      let query = db
+      // PRIMARY: Read from driver Supabase — that's where the driver app writes GPS positions
+      let query = driverSupabase
         .from('drivers')
         .select('id, name, phone, truck_number, status, current_location, last_known_lat, last_known_lng, last_position_update, last_known_speed, last_known_heading, battery_level')
         .order('name');

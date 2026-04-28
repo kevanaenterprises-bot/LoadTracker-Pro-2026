@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, MapPin, Calendar, Package, DollarSign, User, Truck, FileText, Download, Clock, Pencil, Trash2, Eye, Radar, ShieldCheck, Loader2, Wifi, WifiOff, Activity, AlertTriangle, Send, Phone, UserMinus, UserPlus, CheckCircle, Mail, AlertCircle } from 'lucide-react';
 import { db } from '@/lib/supabaseCompat';
+import { driverSupabase } from '@/lib/supabase';
 import { generateNextInvoiceNumber } from '@/lib/invoiceUtils';
 import { Load, PODDocument, Invoice, LoadStop } from '@/types/tms';
 
@@ -140,8 +141,8 @@ const LoadDetailsModal: React.FC<LoadDetailsModalProps> = ({ isOpen, load, onClo
       }
     }
 
-    // Fetch POD documents
-    const { data: docs } = await db
+    // Fetch POD documents from driver Supabase (driver app writes there)
+    const { data: docs } = await driverSupabase
       .from('pod_documents')
       .select('*')
       .eq('load_id', load.id);
