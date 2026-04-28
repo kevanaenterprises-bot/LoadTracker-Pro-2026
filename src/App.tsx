@@ -8,6 +8,7 @@ import { BrowserRouter, Routes, Route, Navigate, useSearchParams, useLocation } 
 
 import { ThemeProvider } from "@/components/theme-provider";
 import Index from "./pages/Index";
+import LandingPage from "./pages/LandingPage";
 import NotFound from "./pages/NotFound";
 import DriverPortalPage from "./pages/DriverPortalPage";
 
@@ -98,12 +99,11 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <Routes>
+            {/* Landing page */}
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/demo" element={<LandingPage />} />
+
             {/* Admin/TMS app routes */}
-            <Route path="/" element={
-              <TokenRedirectGuard>
-                <Index />
-              </TokenRedirectGuard>
-            } />
             <Route path="/app" element={
               <TokenRedirectGuard>
                 <Index />
