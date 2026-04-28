@@ -19,8 +19,8 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Apply rate limiting to all routes
-app.use(limiter);
+// Apply rate limiting only to API routes
+app.use('/api', limiter);
 
 // Middleware
 app.use(cors());
@@ -39,6 +39,41 @@ app.get('/api/health', async (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   } catch (error) {
     res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
+// Login endpoint
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password required' });
+    }
+    const result = await pool.query(
+      'SELECT id, email, name, role, driver_id, is_active, password_hash FROM users WHERE email = $1',
+      [email.toLowerCase().trim()]
+    );
+    const user = result.rows[0];
+    if (!user || user.password_hash !== password) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+    if (!user.is_active) {
+      return res.status(403).json({ error: 'Account is inactive' });
+    }
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        driver_id: user.driver_id,
+        is_active: user.is_active,
+      },
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
