@@ -247,40 +247,43 @@ const DemoExperience: React.FC = () => {
         </div>
       </div>
 
-      {/* Status Tabs */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 mb-6">
-        <div className="flex overflow-x-auto">
-          {statusTabs.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-2 px-4 lg:px-6 py-3 lg:py-4 text-xs lg:text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
-                activeTab === tab.key
-                  ? 'border-blue-600 text-blue-600 bg-blue-50/50'
-                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <span>{tab.label}</span>
-              <span className={`px-2 py-0.5 rounded-full text-xs ${activeTab === tab.key ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>
-                {tab.count}
+      {/* Pipeline Sections */}
+      {[
+        { status: 'UNASSIGNED', label: 'Waiting on Dispatch', headerBg: 'bg-amber-500', countBg: 'bg-amber-400' },
+        { status: 'DISPATCHED', label: 'Dispatched', headerBg: 'bg-sky-500', countBg: 'bg-sky-400' },
+        { status: 'IN_TRANSIT', label: 'In Transit', headerBg: 'bg-blue-600', countBg: 'bg-blue-500' },
+        { status: 'DELIVERED', label: 'Waiting on Invoicing', headerBg: 'bg-emerald-600', countBg: 'bg-emerald-500' },
+        { status: 'INVOICED', label: 'Invoiced', headerBg: 'bg-purple-600', countBg: 'bg-purple-500' },
+      ].map(({ status, label, headerBg, countBg }) => {
+        const sectionLoads = mockLoads.filter(l => {
+          const matchesStatus = l.status === status;
+          const matchesSearch = !searchQuery ||
+            l.loadNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            l.customer.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            l.origin.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            l.destination.toLowerCase().includes(searchQuery.toLowerCase());
+          return matchesStatus && matchesSearch;
+        });
+        return (
+          <div key={status} className="mb-4">
+            <div className={`${headerBg} rounded-t-xl px-4 py-2.5 flex items-center gap-3`}>
+              <span className="text-white font-semibold text-sm">{label}</span>
+              <span className={`${countBg} text-white text-xs font-bold px-2 py-0.5 rounded-full`}>
+                {sectionLoads.length}
               </span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Loads Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {filteredLoads.map(renderLoadCard)}
-      </div>
-
-      {filteredLoads.length === 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center">
-          <Package className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-slate-800 mb-2">No Loads Found</h3>
-          <p className="text-slate-500">Try adjusting your search or filter criteria.</p>
-        </div>
-      )}
+            </div>
+            {sectionLoads.length > 0 ? (
+              <div className="bg-slate-50 border border-t-0 border-slate-200 rounded-b-xl p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {sectionLoads.map(renderLoadCard)}
+              </div>
+            ) : (
+              <div className="bg-slate-50 border border-t-0 border-slate-200 rounded-b-xl px-4 py-3 text-sm text-slate-400 italic">
+                No loads in this stage
+              </div>
+            )}
+          </div>
+        );
+      })}
     </>
   );
 
