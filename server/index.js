@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
 import rateLimit from 'express-rate-limit';
+import nodemailer from 'nodemailer';
+import crypto from 'crypto';
 import hereApi from './hereApi.js';
 
 const { Pool } = pg;
@@ -73,6 +75,92 @@ app.post('/api/login', async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Request password reset — sends email with token link
+app.post('/api/request-password-reset', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email required' });
+
+    const result = await pool.query('SELECT id FROM users WHERE email = $1 AND is_active = true', [email.toLowerCase().trim()]);
+    // Always return success so we don't leak whether an email is registered
+    if (result.rows.length === 0) return res.json({ success: true });
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await pool.query(
+      `INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id) DO UPDATE SET token = $2, expires_at = $3`,
+      [result.rows[0].id, token, expires]
+    );
+
+    const outlookUser = process.env.OUTLOOK_USER;
+    const outlookPassword = process.env.OUTLOOK_PASSWORD;
+    const appUrl = process.env.APP_URL || 'https://loadtrackerpro.turtlelogisticsllc.com';
+
+    if (!outlookUser || !outlookPassword) {
+      console.error('[Reset] Email creds not configured');
+      return res.status(503).json({ error: 'Email service not configured on server' });
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: 'smtp.office365.com',
+      port: 587,
+      secure: false,
+      auth: { user: outlookUser, pass: outlookPassword },
+    });
+
+    await transporter.sendMail({
+      from: outlookUser,
+      to: email,
+      subject: 'LoadTracker Pro — Password Reset',
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;padding:32px;background:#f8fafc;border-radius:8px">
+          <h2 style="color:#1e3a5f;margin-bottom:8px">Reset Your Password</h2>
+          <p style="color:#475569">Click the button below to set a new password. This link expires in 1 hour.</p>
+          <a href="${appUrl}/app/reset-password?token=${token}"
+             style="display:inline-block;margin:24px 0;padding:12px 28px;background:#1e3a5f;color:#fff;border-radius:6px;text-decoration:none;font-weight:bold">
+            Reset Password
+          </a>
+          <p style="color:#94a3b8;font-size:12px">If you didn't request this, ignore this email.</p>
+        </div>
+      `,
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Password reset request error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Complete password reset — validates token and sets new password
+app.post('/api/reset-password', async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) return res.status(400).json({ error: 'Token and password required' });
+    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+    const result = await pool.query(
+      `SELECT user_id FROM password_reset_tokens WHERE token = $1 AND expires_at > NOW()`,
+      [token]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ error: 'Invalid or expired reset link' });
+    }
+
+    const userId = result.rows[0].user_id;
+    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [password, userId]);
+    await pool.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [userId]);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Password reset error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });

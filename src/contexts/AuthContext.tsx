@@ -106,15 +106,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const resetPassword = async (email: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      // Password reset functionality would need to be implemented separately
-      // For now, return a message indicating this feature is not yet available
-      return { 
-        success: false, 
-        error: 'Password reset functionality is not yet implemented. Please contact your administrator.' 
-      };
+      const API_URL = import.meta.env.VITE_API_URL ||
+        (window.location.hostname === 'localhost' ? 'http://localhost:3001' : window.location.origin);
+      const response = await fetch(`${API_URL}/api/request-password-reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await response.json();
+      if (!response.ok) return { success: false, error: data.error || 'Failed to send reset email' };
+      return { success: true };
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to send reset email';
-      return { success: false, error: errorMessage };
+      return { success: false, error: 'An unexpected error occurred' };
     }
   };
 

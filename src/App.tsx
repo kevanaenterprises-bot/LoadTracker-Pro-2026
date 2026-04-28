@@ -11,6 +11,7 @@ import Index from "./pages/Index";
 import LandingPage from "./pages/LandingPage";
 import NotFound from "./pages/NotFound";
 import DriverPortalPage from "./pages/DriverPortalPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 
 const queryClient = new QueryClient();
 
@@ -111,6 +112,7 @@ const App = () => (
             } />
             
             {/* Driver portal routes - exact path and wildcard to catch any sub-paths */}
+            <Route path="/app/reset-password" element={<ResetPasswordPage />} />
             <Route path="/driver-portal" element={<DriverPortalPage />} />
             <Route path="/driver-portal/*" element={<DriverPortalPage />} />
             
