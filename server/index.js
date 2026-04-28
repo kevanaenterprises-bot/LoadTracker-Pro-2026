@@ -99,7 +99,7 @@ app.post('/api/request-password-reset', async (req, res) => {
     );
 
     const outlookUser = process.env.OUTLOOK_USER;
-    const outlookPassword = process.env.OUTLOOK_PASSWORD;
+    const outlookPassword = process.env.OUTLOOK_PASS;
     const appUrl = process.env.APP_URL || 'https://loadtrackerpro.turtlelogisticsllc.com';
 
     if (!outlookUser || !outlookPassword) {
@@ -360,10 +360,10 @@ app.post('/api/send-invoice-email', async (req, res) => {
 
     // Get email configuration from environment
     const outlookUser = process.env.OUTLOOK_USER;
-    const outlookPassword = process.env.OUTLOOK_PASSWORD;
+    const outlookPassword = process.env.OUTLOOK_PASS;
 
     if (!outlookUser || !outlookPassword) {
-      console.warn('[Email] OUTLOOK_USER or OUTLOOK_PASSWORD not configured');
+      console.warn('[Email] OUTLOOK_USER or OUTLOOK_PASS not configured');
       return res.status(503).json({ 
         error: 'Email service not configured',
         message: 'Email credentials are not configured on the server' 
