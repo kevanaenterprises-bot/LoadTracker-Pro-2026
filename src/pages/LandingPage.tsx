@@ -339,7 +339,7 @@ const LandingPage: React.FC = () => {
               <div className="relative bg-white rounded-2xl shadow-xl p-8 lg:p-10 border border-slate-100">
                 <div className="flex items-center gap-4 mb-6">
                   <img
-                    src="https://d64gsuwffb70l.cloudfront.net/6983b3d3af6b26bfb6c07812_1770449773066_9dfece9b.jpg"
+                    src="/kevintruck.jpg"
                     alt="Kevin Owen - Founder"
                     className="w-16 h-16 rounded-full object-cover border-2 border-blue-200"
                   />
@@ -361,11 +361,14 @@ const LandingPage: React.FC = () => {
                   carrier actually needs — at a price that doesn't make you question your business decisions."
                 </blockquote>
 
-                {/* PHOTO: Kevin standing in front of truck */}
+                {/* VIDEO: trucks slideshow */}
                 <div className="mt-6 rounded-xl overflow-hidden border border-slate-200">
-                  <img
-                    src="https://d64gsuwffb70l.cloudfront.net/6983b3d3af6b26bfb6c07812_1770530166498_a4e3e3e1.jpg"
-                    alt="Kevin Owen standing in front of his truck"
+                  <video
+                    src="/trucks.m4v"
+                    autoPlay
+                    muted
+                    loop
+                    playsInline
                     className="w-full h-56 object-cover"
                   />
                 </div>
@@ -411,7 +414,7 @@ const LandingPage: React.FC = () => {
               {/* PHOTO: Fleet trucks */}
               <div className="mt-8 rounded-xl overflow-hidden border border-slate-200 shadow-lg">
                 <img
-                  src="https://d64gsuwffb70l.cloudfront.net/6983b3d3af6b26bfb6c07812_1770530181498_d1e1f1a2.jpg"
+                  src="/fleet.jpg"
                   alt="Our fleet of trucks"
                   className="w-full h-48 object-cover"
                 />
