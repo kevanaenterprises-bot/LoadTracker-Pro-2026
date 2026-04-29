@@ -206,13 +206,13 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
               // Subquery with json_agg for one-to-many
               const fkCol = `${parentSingular}_id`;
               selectParts.push(
-                `(SELECT json_agg(${j.alias}.*) FROM ${j.table} ${j.alias} WHERE ${j.alias}.${fkCol} = ${this.table}.id) AS ${j.alias}`
+                `(SELECT jsonb_agg(to_jsonb(${j.alias})) FROM ${j.table} ${j.alias} WHERE ${j.alias}.${fkCol} = ${this.table}.id) AS ${j.alias}`
               );
             } else {
               // LEFT JOIN + row_to_json for many-to-one
               const fkCol = `${j.alias}_id`;
               joinClauses.push(`LEFT JOIN ${j.table} ${j.alias} ON ${this.table}.${fkCol} = ${j.alias}.id`);
-              selectParts.push(`row_to_json(${j.alias}) AS ${j.alias}`);
+              selectParts.push(`to_jsonb(${j.alias}) AS ${j.alias}`);
             }
           }
 
