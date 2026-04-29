@@ -212,7 +212,7 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
               // LEFT JOIN + row_to_json for many-to-one
               const fkCol = `${j.alias}_id`;
               joinClauses.push(`LEFT JOIN ${j.table} ${j.alias} ON ${this.table}.${fkCol} = ${j.alias}.id`);
-              selectParts.push(`row_to_json(${j.alias}.*) AS ${j.alias}`);
+              selectParts.push(`row_to_json(${j.alias}) AS ${j.alias}`);
             }
           }
 
@@ -223,19 +223,29 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
         }
 
         if (this.whereConditions.length > 0) {
+          // Qualify unqualified columns with main table name to avoid ambiguity when JOINs are present
+          const qualify = (col: string) => col.includes('.') ? col : `${this.table}.${col}`;
           const whereClauses = this.whereConditions.map(cond => {
             if (cond.operator === 'IN') {
               const placeholders = cond.value.map((_: any) => `$${paramIndex++}`).join(', ');
               params.push(...cond.value);
-              return `${cond.column} IN (${placeholders})`;
+              return `${qualify(cond.column)} IN (${placeholders})`;
             } else if (cond.operator === 'IS' && cond.value === null) {
-              return `${cond.column} IS NULL`;
+              return `${qualify(cond.column)} IS NULL`;
             } else {
               params.push(cond.value);
-              return `${cond.column} ${cond.operator} $${paramIndex++}`;
+              return `${qualify(cond.column)} ${cond.operator} $${paramIndex++}`;
             }
           });
           sql += ` WHERE ${whereClauses.join(' AND ')}`;
+        }
+
+        // Qualify ORDER BY column with main table if unqualified
+        if (this.orderByClause && !this.orderByClause.includes('.')) {
+          this.orderByClause = this.orderByClause.replace(
+            /ORDER BY (\w+)/,
+            `ORDER BY ${this.table}.$1`
+          );
         }
 
         sql += this.orderByClause + this.limitClause;
