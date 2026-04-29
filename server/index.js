@@ -48,7 +48,7 @@ pool.query(`
 app.get('/api/health', async (req, res) => {
   try {
     await pool.query('SELECT NOW()');
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    res.json({ status: 'ok', timestamp: new Date().toISOString(), version: 'v5-driver-supabase' });
   } catch (error) {
     res.status(500).json({ status: 'error', message: error.message });
   }
