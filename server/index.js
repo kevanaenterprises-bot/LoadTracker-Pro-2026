@@ -387,7 +387,7 @@ app.post('/api/send-invoice-email', async (req, res) => {
 
     try {
       const podRes = await fetch(
-        `${DRIVER_SUPABASE_URL}/rest/v1/pod_documents?load_id=eq.${load_id}&select=document_url,document_name`,
+        `${DRIVER_SUPABASE_URL}/rest/v1/pod_documents?load_id=eq.${load_id}&select=file_url,file_name`,
         {
           headers: {
             'apikey': DRIVER_SUPABASE_ANON_KEY,
@@ -400,10 +400,10 @@ app.post('/api/send-invoice-email', async (req, res) => {
         console.log(`[Email] Found ${pods.length} POD document(s) for load ${load_id}`);
         for (const pod of pods) {
           try {
-            const imgRes = await fetch(pod.document_url);
+            const imgRes = await fetch(pod.file_url);
             if (imgRes.ok) {
               const buffer = Buffer.from(await imgRes.arrayBuffer());
-              const filename = pod.document_name || `POD_${load_id}.jpg`;
+              const filename = pod.file_name || `POD_${load_id}.jpg`;
               podAttachments.push({ filename, content: buffer });
             }
           } catch (e) {
