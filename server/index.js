@@ -336,13 +336,54 @@ app.post('/api/calculate-route', async (req, res) => {
   }
 });
 
+// Helper: send email via Resend
+async function sendViaResend({ to, cc, subject, html, attachments = [] }) {
+  const RESEND_API_KEY = process.env.RESEND_API_KEY;
+  const FROM_EMAIL = process.env.FROM_EMAIL || 'kevin@go4fc.com';
+  const AUTO_CC = process.env.AUTO_CC ? process.env.AUTO_CC.split(',').map(e => e.trim()).filter(Boolean) : [];
+
+  if (!RESEND_API_KEY) throw new Error('RESEND_API_KEY not configured in Railway environment variables');
+
+  const toList = Array.isArray(to) ? to : [to];
+  const ccList = [...(Array.isArray(cc) ? cc : cc ? [cc] : []), ...AUTO_CC].filter(Boolean);
+
+  const body = { from: FROM_EMAIL, to: toList, subject, html };
+  if (ccList.length) body.cc = ccList;
+  if (attachments.length) {
+    body.attachments = attachments.map(a => ({
+      filename: a.filename,
+      content: Buffer.isBuffer(a.content) ? a.content.toString('base64') : a.content,
+    }));
+  }
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.message || 'Resend API error');
+  return data;
+}
+
 // Send invoice email endpoint
 app.post('/api/send-invoice-email', async (req, res) => {
   try {
-    const { load_id, additional_cc } = req.body;
-    
+    const { load_id, additional_cc, test_email } = req.body;
+
     if (!load_id) {
       return res.status(400).json({ error: 'load_id is required' });
+    }
+
+    // Handle test email from Settings page
+    if (load_id === '__test__') {
+      const recipient = test_email || process.env.FROM_EMAIL || 'kevin@go4fc.com';
+      await sendViaResend({
+        to: recipient,
+        subject: 'LoadTracker Pro — Test Email',
+        html: `<h2>Test Email</h2><p>Your email configuration is working correctly.</p><p>Sent at: ${new Date().toISOString()}</p>`,
+      });
+      return res.json({ success: true, message: `Test email sent to ${recipient}` });
     }
 
     console.log(`[Email] Sending invoice for load ${load_id}`);
@@ -390,15 +431,11 @@ app.post('/api/send-invoice-email', async (req, res) => {
       return res.status(400).json({ error: 'Customer email not configured' });
     }
 
-    // Get email configuration from environment
-    const outlookUser = process.env.OUTLOOK_USER;
-    const outlookPassword = process.env.OUTLOOK_PASS;
-
-    if (!outlookUser || !outlookPassword) {
-      console.warn('[Email] OUTLOOK_USER or OUTLOOK_PASS not configured');
+    if (!process.env.RESEND_API_KEY) {
+      console.warn('[Email] RESEND_API_KEY not configured');
       return res.status(503).json({
         error: 'Email service not configured',
-        message: 'Email credentials are not configured on the server'
+        message: 'RESEND_API_KEY is not set in Railway environment variables'
       });
     }
 
@@ -430,23 +467,15 @@ app.post('/api/send-invoice-email', async (req, res) => {
       console.warn('[Email] Failed to fetch POD documents:', e.message);
     }
 
-    const transporter = nodemailer.createTransport({
-      host: 'smtp.office365.com',
-      port: 587,
-      secure: false,
-      auth: { user: outlookUser, pass: outlookPassword },
-    });
-
     const emailedTo = [customerEmail, ...(additional_cc || [])].join(', ');
 
     const podListHtml = podAttachments.length > 0
       ? `<p><strong>${podAttachments.length} POD document(s) attached.</strong></p>`
       : '<p>No POD documents found for this load.</p>';
 
-    await transporter.sendMail({
-      from: outlookUser,
+    await sendViaResend({
       to: customerEmail,
-      cc: additional_cc && additional_cc.length ? additional_cc.join(', ') : undefined,
+      cc: additional_cc && additional_cc.length ? additional_cc : undefined,
       subject: `Invoice ${invoice.invoice_number} — Load #${invoice.load_number}`,
       html: `
         <h2>Invoice ${invoice.invoice_number}</h2>
