@@ -352,7 +352,7 @@ async function sendViaResend({ to, cc, subject, html, attachments = [] }) {
   if (attachments.length) {
     body.attachments = attachments.map(a => ({
       filename: a.filename,
-      content: Buffer.isBuffer(a.content) ? a.content.toString('base64') : a.content,
+      content: Buffer.from(a.content).toString('base64'),
     }));
   }
 
