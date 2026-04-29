@@ -374,24 +374,88 @@ app.post('/api/send-invoice-email', async (req, res) => {
 
     if (!outlookUser || !outlookPassword) {
       console.warn('[Email] OUTLOOK_USER or OUTLOOK_PASS not configured');
-      return res.status(503).json({ 
+      return res.status(503).json({
         error: 'Email service not configured',
-        message: 'Email credentials are not configured on the server' 
+        message: 'Email credentials are not configured on the server'
       });
     }
 
-    // For now, return a simulated success response
-    // In production, integrate with nodemailer to send actual emails
+    // Fetch POD documents from driver Supabase
+    const DRIVER_SUPABASE_URL = process.env.DRIVER_SUPABASE_URL || 'https://qekevyqhwxqyypmhjobd.supabase.co';
+    const DRIVER_SUPABASE_ANON_KEY = process.env.DRIVER_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFla2V2eXFod3hxeXlwbWhqb2JkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTUwNDEsImV4cCI6MjA4NjU5MTA0MX0.YXbIJG5F1nSB9obbuLkhINPcPyznCc4VpZhWuP70_BE';
+    let podAttachments = [];
+
+    try {
+      const podRes = await fetch(
+        `${DRIVER_SUPABASE_URL}/rest/v1/pod_documents?load_id=eq.${load_id}&select=document_url,document_name`,
+        {
+          headers: {
+            'apikey': DRIVER_SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${DRIVER_SUPABASE_ANON_KEY}`,
+          }
+        }
+      );
+      if (podRes.ok) {
+        const pods = await podRes.json();
+        console.log(`[Email] Found ${pods.length} POD document(s) for load ${load_id}`);
+        for (const pod of pods) {
+          try {
+            const imgRes = await fetch(pod.document_url);
+            if (imgRes.ok) {
+              const buffer = Buffer.from(await imgRes.arrayBuffer());
+              const filename = pod.document_name || `POD_${load_id}.jpg`;
+              podAttachments.push({ filename, content: buffer });
+            }
+          } catch (e) {
+            console.warn('[Email] Failed to fetch POD image:', pod.document_url, e.message);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Email] Failed to fetch POD documents:', e.message);
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: 'smtp.office365.com',
+      port: 587,
+      secure: false,
+      auth: { user: outlookUser, pass: outlookPassword },
+    });
+
     const emailedTo = [customerEmail, ...(additional_cc || [])].join(', ');
-    
-    console.log(`[Email] Would send invoice ${invoice.invoice_number} to: ${emailedTo}`);
-    
+
+    const podListHtml = podAttachments.length > 0
+      ? `<p><strong>${podAttachments.length} POD document(s) attached.</strong></p>`
+      : '<p>No POD documents found for this load.</p>';
+
+    await transporter.sendMail({
+      from: outlookUser,
+      to: customerEmail,
+      cc: additional_cc && additional_cc.length ? additional_cc.join(', ') : undefined,
+      subject: `Invoice ${invoice.invoice_number} — Load #${invoice.load_number}`,
+      html: `
+        <h2>Invoice ${invoice.invoice_number}</h2>
+        <p>Dear ${invoice.company_name || 'Valued Customer'},</p>
+        <p>Please find your invoice for Load <strong>#${invoice.load_number}</strong> attached.</p>
+        <table style="border-collapse:collapse;width:300px">
+          <tr><td style="padding:4px 8px"><strong>Invoice #:</strong></td><td>${invoice.invoice_number}</td></tr>
+          <tr><td style="padding:4px 8px"><strong>Amount:</strong></td><td>$${Number(invoice.amount || 0).toFixed(2)}</td></tr>
+        </table>
+        ${podListHtml}
+        <p>Thank you for your business.</p>
+      `,
+      attachments: podAttachments,
+    });
+
+    console.log(`[Email] Sent invoice ${invoice.invoice_number} to: ${emailedTo} with ${podAttachments.length} POD(s)`);
+
     res.json({
       success: true,
       message: `Invoice ${invoice.invoice_number} sent successfully to ${customerEmail}`,
       emailed_to: emailedTo,
       load_id: load_id,
-      invoice_number: invoice.invoice_number
+      invoice_number: invoice.invoice_number,
+      pod_count: podAttachments.length,
     });
 
   } catch (error) {
