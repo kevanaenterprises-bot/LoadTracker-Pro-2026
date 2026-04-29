@@ -347,21 +347,33 @@ app.post('/api/send-invoice-email', async (req, res) => {
 
     console.log(`[Email] Sending invoice for load ${load_id}`);
     
-    // Get invoice data
-    const invoiceResult = await pool.query(
-      `SELECT i.*, l.id, l.load_number, c.company_name, c.email as customer_email
-       FROM invoices i
-       JOIN loads l ON i.load_id = l.id
+    const DRIVER_SUPABASE_URL_BASE = process.env.DRIVER_SUPABASE_URL || 'https://qekevyqhwxqyypmhjobd.supabase.co';
+    const DRIVER_SUPABASE_ANON = process.env.DRIVER_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFla2V2eXFod3hxeXlwbWhqb2JkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTUwNDEsImV4cCI6MjA4NjU5MTA0MX0.YXbIJG5F1nSB9obbuLkhINPcPyznCc4VpZhWuP70_BE';
+    const driverHeaders = { 'apikey': DRIVER_SUPABASE_ANON, 'Authorization': `Bearer ${DRIVER_SUPABASE_ANON}` };
+
+    // Get invoice from driver Supabase
+    const invRes = await fetch(
+      `${DRIVER_SUPABASE_URL_BASE}/rest/v1/invoices?load_id=eq.${load_id}&select=invoice_number,amount&order=created_at.desc&limit=1`,
+      { headers: driverHeaders }
+    );
+    const invRows = invRes.ok ? await invRes.json() : [];
+
+    // Get load + customer from admin Railway DB
+    const loadResult = await pool.query(
+      `SELECT l.load_number, c.company_name, c.email as customer_email
+       FROM loads l
        LEFT JOIN customers c ON l.customer_id = c.id
        WHERE l.id = $1`,
       [load_id]
     );
 
-    if (invoiceResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Invoice not found for this load' });
+    if (loadResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Load not found' });
     }
 
-    const invoice = invoiceResult.rows[0];
+    const loadRow = loadResult.rows[0];
+    const invRow = invRows[0] || {};
+    const invoice = { ...invRow, ...loadRow };
     const customerEmail = invoice.customer_email;
 
     if (!customerEmail) {
@@ -381,19 +393,12 @@ app.post('/api/send-invoice-email', async (req, res) => {
     }
 
     // Fetch POD documents from driver Supabase
-    const DRIVER_SUPABASE_URL = process.env.DRIVER_SUPABASE_URL || 'https://qekevyqhwxqyypmhjobd.supabase.co';
-    const DRIVER_SUPABASE_ANON_KEY = process.env.DRIVER_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFla2V2eXFod3hxeXlwbWhqb2JkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTUwNDEsImV4cCI6MjA4NjU5MTA0MX0.YXbIJG5F1nSB9obbuLkhINPcPyznCc4VpZhWuP70_BE';
     let podAttachments = [];
 
     try {
       const podRes = await fetch(
-        `${DRIVER_SUPABASE_URL}/rest/v1/pod_documents?load_id=eq.${load_id}&select=file_url,file_name`,
-        {
-          headers: {
-            'apikey': DRIVER_SUPABASE_ANON_KEY,
-            'Authorization': `Bearer ${DRIVER_SUPABASE_ANON_KEY}`,
-          }
-        }
+        `${DRIVER_SUPABASE_URL_BASE}/rest/v1/pod_documents?load_id=eq.${load_id}&select=file_url,file_name`,
+        { headers: driverHeaders }
       );
       if (podRes.ok) {
         const pods = await podRes.json();
