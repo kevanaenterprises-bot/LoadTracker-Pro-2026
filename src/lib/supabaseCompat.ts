@@ -174,8 +174,54 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
       let paramIndex = 1;
 
       if (this.operation === 'select') {
-        sql = `SELECT ${this.selectColumns} FROM ${this.table}`;
-        
+        // Parse Supabase-style join syntax: "alias:table(*)" or "alias:table(col1,col2)"
+        // e.g. "*, customer:customers(*), driver:drivers(*)"
+        const joinPattern = /(\w+):(\w+)\(([^)]*)\)/g;
+        const joins: Array<{ alias: string; table: string; columns: string }> = [];
+        let joinMatch;
+        while ((joinMatch = joinPattern.exec(this.selectColumns)) !== null) {
+          joins.push({ alias: joinMatch[1], table: joinMatch[2], columns: joinMatch[3] || '*' });
+        }
+
+        if (joins.length > 0) {
+          // Strip join specs from selectColumns, keep plain columns
+          let baseColumns = this.selectColumns
+            .replace(/\w+:\w+\([^)]*\)/g, '')
+            .replace(/,\s*,/g, ',')
+            .replace(/,\s*$/,'')
+            .replace(/^\s*,/,'')
+            .trim() || '*';
+
+          // Build SELECT list: main table columns + row_to_json or json_agg for each join
+          const selectParts = [`${this.table}.${baseColumns}`];
+          const joinClauses: string[] = [];
+
+          for (const j of joins) {
+            // Detect one-to-many: child table name contains parent table name as a prefix/suffix
+            // e.g. ifta_trip_states contains ifta_trips → one-to-many
+            const parentSingular = this.table.replace(/s$/, '');
+            const isOneToMany = j.table.startsWith(parentSingular + '_') || j.table.endsWith('_' + parentSingular);
+
+            if (isOneToMany) {
+              // Subquery with json_agg for one-to-many
+              const fkCol = `${parentSingular}_id`;
+              selectParts.push(
+                `(SELECT json_agg(${j.alias}.*) FROM ${j.table} ${j.alias} WHERE ${j.alias}.${fkCol} = ${this.table}.id) AS ${j.alias}`
+              );
+            } else {
+              // LEFT JOIN + row_to_json for many-to-one
+              const fkCol = `${j.alias}_id`;
+              joinClauses.push(`LEFT JOIN ${j.table} ${j.alias} ON ${this.table}.${fkCol} = ${j.alias}.id`);
+              selectParts.push(`row_to_json(${j.alias}.*) AS ${j.alias}`);
+            }
+          }
+
+          sql = `SELECT ${selectParts.join(', ')} FROM ${this.table}`;
+          if (joinClauses.length > 0) sql += ' ' + joinClauses.join(' ');
+        } else {
+          sql = `SELECT ${this.selectColumns} FROM ${this.table}`;
+        }
+
         if (this.whereConditions.length > 0) {
           const whereClauses = this.whereConditions.map(cond => {
             if (cond.operator === 'IN') {
@@ -191,7 +237,7 @@ class PostgreSQLQueryBuilder implements QueryBuilder {
           });
           sql += ` WHERE ${whereClauses.join(' AND ')}`;
         }
-        
+
         sql += this.orderByClause + this.limitClause;
         
       } else if (this.operation === 'insert') {
