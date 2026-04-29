@@ -351,30 +351,40 @@ app.post('/api/send-invoice-email', async (req, res) => {
     const DRIVER_SUPABASE_ANON = process.env.DRIVER_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFla2V2eXFod3hxeXlwbWhqb2JkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTUwNDEsImV4cCI6MjA4NjU5MTA0MX0.YXbIJG5F1nSB9obbuLkhINPcPyznCc4VpZhWuP70_BE';
     const driverHeaders = { 'apikey': DRIVER_SUPABASE_ANON, 'Authorization': `Bearer ${DRIVER_SUPABASE_ANON}` };
 
-    // Get invoice from driver Supabase
+    // Get load + customer from driver Supabase
+    const loadRes = await fetch(
+      `${DRIVER_SUPABASE_URL_BASE}/rest/v1/loads?id=eq.${load_id}&select=id,load_number,customer_id&limit=1`,
+      { headers: driverHeaders }
+    );
+    const loadRows = loadRes.ok ? await loadRes.json() : [];
+    if (!loadRows.length) {
+      return res.status(404).json({ error: 'Load not found' });
+    }
+    const loadRow = loadRows[0];
+
+    // Get customer email
+    const custRes = await fetch(
+      `${DRIVER_SUPABASE_URL_BASE}/rest/v1/customers?id=eq.${loadRow.customer_id}&select=company_name,email&limit=1`,
+      { headers: driverHeaders }
+    );
+    const custRows = custRes.ok ? await custRes.json() : [];
+    const customer = custRows[0] || {};
+
+    // Get invoice
     const invRes = await fetch(
       `${DRIVER_SUPABASE_URL_BASE}/rest/v1/invoices?load_id=eq.${load_id}&select=invoice_number,amount&order=created_at.desc&limit=1`,
       { headers: driverHeaders }
     );
     const invRows = invRes.ok ? await invRes.json() : [];
-
-    // Get load + customer from admin Railway DB
-    const loadResult = await pool.query(
-      `SELECT l.load_number, c.company_name, c.email as customer_email
-       FROM loads l
-       LEFT JOIN customers c ON l.customer_id = c.id
-       WHERE l.id = $1`,
-      [load_id]
-    );
-
-    if (loadResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Load not found' });
-    }
-
-    const loadRow = loadResult.rows[0];
     const invRow = invRows[0] || {};
-    const invoice = { ...invRow, ...loadRow };
-    const customerEmail = invoice.customer_email;
+
+    const invoice = {
+      invoice_number: invRow.invoice_number || 'N/A',
+      amount: invRow.amount || 0,
+      load_number: loadRow.load_number,
+      company_name: customer.company_name,
+    };
+    const customerEmail = customer.email;
 
     if (!customerEmail) {
       return res.status(400).json({ error: 'Customer email not configured' });
