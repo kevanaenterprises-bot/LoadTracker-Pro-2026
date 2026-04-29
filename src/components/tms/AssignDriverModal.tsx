@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, User, Phone, MapPin, Truck, Send, Loader2, CheckCircle, AlertCircle, UserMinus, Brain, Sparkles, Star, ChevronDown, ChevronUp, Zap } from 'lucide-react';
 import { db } from '@/lib/supabaseCompat';
+import { driverSupabase } from '@/lib/supabase';
 import { Driver, Load } from '@/types/tms';
 import { useUsage } from '@/contexts/UsageContext';
 
@@ -185,6 +186,28 @@ const AssignDriverModal: React.FC<AssignDriverModalProps> = ({ isOpen, load, onC
         .from('drivers')
         .update({ status: 'on_route' })
         .eq('id', selectedDriver.id);
+
+      // Mirror load to driver Supabase so Expo app can find it
+      try {
+        await driverSupabase.from('loads').upsert({
+          id: load.id,
+          load_number: load.load_number,
+          driver_id: selectedDriver.id,
+          status: 'DISPATCHED',
+          origin_city: load.origin_city,
+          origin_state: load.origin_state,
+          dest_city: load.dest_city,
+          dest_state: load.dest_state,
+          rate: load.rate,
+          cargo_description: load.cargo_description,
+          pickup_date: load.pickup_date,
+          delivery_date: load.delivery_date,
+          customer_id: load.customer_id,
+          acceptance_token: acceptanceToken,
+        }, { onConflict: 'id' });
+      } catch (mirrorErr) {
+        console.warn('[Assign] Failed to mirror load to driver Supabase:', mirrorErr);
+      }
 
       setSmsSuccess(true);
 
