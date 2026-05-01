@@ -211,11 +211,12 @@ const AssignDriverModal: React.FC<AssignDriverModalProps> = ({ isOpen, load, onC
           cargo_description: load.cargo_description,
           pickup_date: load.pickup_date,
           delivery_date: load.delivery_date,
-          customer_id: load.customer_id,
+          customer_id: null,
           acceptance_token: acceptanceToken,
         }, { onConflict: 'id' });
-      } catch (mirrorErr) {
-        console.warn('[Assign] Failed to mirror load to driver Supabase:', mirrorErr);
+      } catch (mirrorErr: any) {
+        console.error('[Assign] Failed to mirror load to driver Supabase:', mirrorErr?.message || mirrorErr);
+        setSmsError(`Mirror failed: ${mirrorErr?.message || 'Unknown error'}`);
       }
 
       setSmsSuccess(true);

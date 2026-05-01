@@ -5,8 +5,6 @@
  * rate confirmation documents and parse them into structured data.
  */
 
-import { supabase } from './supabase';
-
 const VISION_API_ENDPOINT = 'https://vision.googleapis.com/v1/images:annotate';
 
 // Type definitions for parsed rate confirmation data
