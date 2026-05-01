@@ -367,6 +367,20 @@ async function sendViaResend({ to, cc, subject, html, attachments = [] }) {
 }
 
 // Send invoice email endpoint
+// Driver app calls this to update load status in Railway PostgreSQL
+app.post('/api/update-load-status', async (req, res) => {
+  try {
+    const { load_id, status } = req.body;
+    if (!load_id || !status) return res.status(400).json({ error: 'load_id and status required' });
+    const allowed = ['DISPATCHED', 'IN_TRANSIT', 'DELIVERED', 'INVOICED'];
+    if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+    await pool.query('UPDATE loads SET status = $1 WHERE id = $2', [status, load_id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/send-invoice-email', async (req, res) => {
   try {
     const { load_id, additional_cc, test_email } = req.body;
