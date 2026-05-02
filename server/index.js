@@ -463,8 +463,12 @@ app.post('/api/send-invoice-email', async (req, res) => {
             const imgRes = await fetch(pod.file_url);
             if (imgRes.ok) {
               const buffer = Buffer.from(await imgRes.arrayBuffer());
-              const filename = pod.file_name || `POD_${load_id}.jpg`;
-              podAttachments.push({ filename, content: buffer });
+              if (buffer.length > 0) {
+                const filename = pod.file_name || `POD_${load_id}.jpg`;
+                podAttachments.push({ filename, content: buffer });
+              } else {
+                console.warn('[Email] POD file is empty, skipping:', pod.file_url);
+              }
             }
           } catch (e) {
             console.warn('[Email] Failed to fetch POD image:', pod.document_url, e.message);
