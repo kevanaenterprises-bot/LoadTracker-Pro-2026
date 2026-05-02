@@ -5,6 +5,8 @@ import rateLimit from 'express-rate-limit';
 import nodemailer from 'nodemailer';
 import crypto from 'crypto';
 import hereApi from './hereApi.js';
+import PDFDocument from 'pdfkit';
+import { PDFDocument as LibPDF, rgb } from 'pdf-lib';
 
 const { Pool } = pg;
 
@@ -336,6 +338,137 @@ app.post('/api/calculate-route', async (req, res) => {
   }
 });
 
+// Generate invoice PDF and combine with POD images into a single PDF buffer
+async function buildInvoicePDF({ invoice, load, customer, geofenceTimestamps, podImageBuffers }) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const BLUE = '#2D5BA0';
+      const doc = new PDFDocument({ margin: 40, size: 'LETTER' });
+      const chunks = [];
+      doc.on('data', c => chunks.push(c));
+      doc.on('end', async () => {
+        try {
+          const invoicePdfBytes = Buffer.concat(chunks);
+
+          // If no POD images, return invoice PDF as-is
+          if (!podImageBuffers.length) return resolve(invoicePdfBytes);
+
+          // Merge invoice PDF + POD images into one PDF using pdf-lib
+          const merged = await LibPDF.create();
+          const invoiceDoc = await LibPDF.load(invoicePdfBytes);
+          for (const page of invoiceDoc.getPages()) {
+            const [copiedPage] = await merged.copyPages(invoiceDoc, [invoiceDoc.getPages().indexOf(page)]);
+            merged.addPage(copiedPage);
+          }
+
+          // Add each POD image as a new page
+          for (const imgBuf of podImageBuffers) {
+            try {
+              let embeddedImg;
+              try { embeddedImg = await merged.embedJpg(imgBuf); }
+              catch { embeddedImg = await merged.embedPng(imgBuf); }
+              const { width, height } = embeddedImg.scale(1);
+              const pageWidth = 612, pageHeight = 792;
+              const scale = Math.min(pageWidth / width, pageHeight / height, 1);
+              const imgPage = merged.addPage([pageWidth, pageHeight]);
+              imgPage.drawImage(embeddedImg, {
+                x: (pageWidth - width * scale) / 2,
+                y: (pageHeight - height * scale) / 2,
+                width: width * scale,
+                height: height * scale,
+              });
+            } catch (e) {
+              console.warn('[PDF] Could not embed POD image:', e.message);
+            }
+          }
+
+          const finalBytes = await merged.save();
+          resolve(Buffer.from(finalBytes));
+        } catch (e) { reject(e); }
+      });
+      doc.on('error', reject);
+
+      // ── Header bar ──
+      doc.rect(40, 40, 532, 44).fill(BLUE);
+      doc.fontSize(18).fillColor('white').font('Helvetica-Bold')
+        .text(invoice.company_name || 'GO 4 Farms & Cattle', 52, 52, { width: 280 });
+      doc.fontSize(18).text('INVOICE', 40, 52, { width: 524, align: 'right' });
+
+      // ── Invoice meta ──
+      doc.fillColor('black').font('Helvetica-Bold').fontSize(12)
+        .text(`Invoice #: ${invoice.invoice_number}`, 40, 104);
+      doc.font('Helvetica').fontSize(11)
+        .text(`Date: ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`, 350, 104);
+      doc.font('Helvetica').fontSize(10).fillColor('#555')
+        .text(`Load #: ${load.load_number || ''}`, 40, 120)
+        .text(`BOL #: ${load.bol_number || ''}`, 220, 120);
+
+      // ── Bill To ──
+      doc.moveTo(40, 142).lineTo(572, 142).strokeColor('#ddd').stroke();
+      doc.font('Helvetica-Bold').fontSize(9).fillColor('#888')
+        .text('BILL TO', 40, 150);
+      doc.font('Helvetica-Bold').fontSize(11).fillColor('black')
+        .text(customer.company_name || '-', 40, 163);
+      doc.font('Helvetica').fontSize(10).fillColor('#555')
+        .text(customer.email || '', 40, 177);
+
+      // ── Route ──
+      doc.moveTo(40, 200).lineTo(572, 200).strokeColor('#ddd').stroke();
+      doc.font('Helvetica').fontSize(11).fillColor('black')
+        .text(`Route: ${load.origin_city || ''}, ${load.origin_state || ''}  ->  ${load.dest_city || ''}, ${load.dest_state || ''}`, 40, 210);
+
+      // ── Line items table ──
+      doc.rect(40, 230, 532, 20).fill('#eee');
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('black')
+        .text('Description', 52, 235).text('Amount', 52, 235, { width: 512, align: 'right' });
+
+      let y = 258;
+      const addRow = (label, amount) => {
+        if (!amount) return;
+        doc.font('Helvetica').fontSize(10).fillColor('black')
+          .text(label, 52, y)
+          .text(`$${parseFloat(amount).toFixed(2)}`, 52, y, { width: 512, align: 'right' });
+        y += 20;
+      };
+      addRow('Freight Charge', load.rate);
+      addRow('Extra Stop Fee', load.extra_stop_fee);
+      addRow('Lumper Fee', load.lumper_fee);
+
+      // ── Total bar ──
+      const total = (parseFloat(load.rate) || 0) + (parseFloat(load.extra_stop_fee) || 0) + (parseFloat(load.lumper_fee) || 0);
+      doc.rect(40, y + 4, 532, 24).fill(BLUE);
+      doc.font('Helvetica-Bold').fontSize(11).fillColor('white')
+        .text('TOTAL DUE', 52, y + 10)
+        .text(`$${total.toFixed(2)}`, 52, y + 10, { width: 512, align: 'right' });
+      y += 44;
+
+      // ── GPS Timestamps ──
+      if (geofenceTimestamps?.length) {
+        y += 12;
+        doc.moveTo(40, y).lineTo(572, y).strokeColor('#ddd').stroke();
+        y += 10;
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#888').text('GPS VERIFIED TIMESTAMPS', 40, y);
+        y += 14;
+        for (const ts of geofenceTimestamps) {
+          const inTime = ts.geofence_entered_at ? new Date(ts.geofence_entered_at).toLocaleString() : '';
+          const outTime = ts.geofence_exited_at ? new Date(ts.geofence_exited_at).toLocaleString() : '';
+          const label = ts.stop_type === 'delivery' ? 'Delivery' : 'Pickup';
+          doc.font('Helvetica-Bold').fontSize(10).fillColor('black').text(`${label}:`, 40, y, { width: 60 });
+          doc.font('Helvetica').fontSize(10).text(`In: ${inTime}`, 105, y).text(`Out: ${outTime}`, 340, y);
+          y += 16;
+        }
+      }
+
+      // ── Footer ──
+      y += 16;
+      doc.font('Helvetica').fontSize(9).fillColor('#888')
+        .text('Payment due within 30 days. Thank you for your business!', 40, y);
+
+      doc.end();
+    } catch (e) { reject(e); }
+  });
+}
+
 // Helper: send email via Resend
 async function sendViaResend({ to, cc, subject, html, attachments = [] }) {
   const RESEND_API_KEY = process.env.RESEND_API_KEY;
@@ -447,71 +580,79 @@ app.post('/api/send-invoice-email', async (req, res) => {
       });
     }
 
-    // Fetch POD documents from driver Supabase
-    let podAttachments = [];
+    // Get full load details for PDF
+    const fullLoadRes = await pool.query(
+      `SELECT l.*, c.company_name, c.email FROM loads l LEFT JOIN customers c ON c.id = l.customer_id WHERE l.id = $1`,
+      [load_id]
+    );
+    const fullLoad = fullLoadRes.rows[0] || {};
 
+    // Get geofence timestamps
+    const geoRes = await pool.query(
+      `SELECT stop_type, geofence_entered_at, geofence_exited_at FROM load_stops WHERE load_id = $1 ORDER BY stop_sequence`,
+      [load_id]
+    ).catch(() => ({ rows: [] }));
+
+    // Fetch POD images from driver Supabase
+    let podImageBuffers = [];
     try {
       const podRes = await fetch(
-        `${DRIVER_SUPABASE_URL_BASE}/rest/v1/pod_documents?load_id=eq.${load_id}&select=file_url,file_name`,
+        `${DRIVER_SUPABASE_URL_BASE}/rest/v1/pod_documents?load_id=eq.${load_id}&select=file_url`,
         { headers: driverHeaders }
       );
       if (podRes.ok) {
         const pods = await podRes.json();
-        console.log(`[Email] Found ${pods.length} POD document(s) for load ${load_id}`);
         for (const pod of pods) {
           try {
             const imgRes = await fetch(pod.file_url);
             if (imgRes.ok) {
-              const buffer = Buffer.from(await imgRes.arrayBuffer());
-              if (buffer.length > 0) {
-                const filename = pod.file_name || `POD_${load_id}.jpg`;
-                podAttachments.push({ filename, content: buffer });
-              } else {
-                console.warn('[Email] POD file is empty, skipping:', pod.file_url);
-              }
+              const buf = Buffer.from(await imgRes.arrayBuffer());
+              if (buf.length > 0) podImageBuffers.push(buf);
+              else console.warn('[PDF] POD image empty, skipping:', pod.file_url);
             }
-          } catch (e) {
-            console.warn('[Email] Failed to fetch POD image:', pod.document_url, e.message);
-          }
+          } catch (e) { console.warn('[PDF] Failed to fetch POD:', e.message); }
         }
       }
-    } catch (e) {
-      console.warn('[Email] Failed to fetch POD documents:', e.message);
-    }
+    } catch (e) { console.warn('[PDF] Failed to fetch POD list:', e.message); }
+
+    // Get company name from settings
+    const settingsRes = await pool.query(`SELECT key, value FROM settings WHERE key = 'company_name'`).catch(() => ({ rows: [] }));
+    const companyName = settingsRes.rows.find(r => r.key === 'company_name')?.value || 'GO 4 Farms & Cattle';
+    invoice.company_name = companyName;
+
+    // Build combined invoice + POD PDF
+    const pdfBuffer = await buildInvoicePDF({
+      invoice,
+      load: fullLoad,
+      customer,
+      geofenceTimestamps: geoRes.rows,
+      podImageBuffers,
+    });
 
     const emailedTo = [customerEmail, ...(additional_cc || [])].join(', ');
-
-    const podListHtml = podAttachments.length > 0
-      ? `<p><strong>${podAttachments.length} POD document(s) attached.</strong></p>`
-      : '<p>No POD documents found for this load.</p>';
 
     await sendViaResend({
       to: customerEmail,
       cc: additional_cc && additional_cc.length ? additional_cc : undefined,
       subject: `Invoice ${invoice.invoice_number} — Load #${invoice.load_number}`,
       html: `
-        <h2>Invoice ${invoice.invoice_number}</h2>
-        <p>Dear ${invoice.company_name || 'Valued Customer'},</p>
-        <p>Please find your invoice for Load <strong>#${invoice.load_number}</strong> attached.</p>
-        <table style="border-collapse:collapse;width:300px">
-          <tr><td style="padding:4px 8px"><strong>Invoice #:</strong></td><td>${invoice.invoice_number}</td></tr>
-          <tr><td style="padding:4px 8px"><strong>Amount:</strong></td><td>$${Number(invoice.amount || 0).toFixed(2)}</td></tr>
-        </table>
-        ${podListHtml}
-        <p>Thank you for your business.</p>
+        <p>Dear ${customer.company_name || 'Valued Customer'},</p>
+        <p>Please find attached your invoice for Load <strong>#${fullLoad.load_number}</strong>.</p>
+        <p>The attachment includes the invoice and all proof of delivery documents.</p>
+        <p>Payment due within 30 days. Thank you for your business.</p>
       `,
-      attachments: podAttachments,
+      attachments: [{ filename: `Invoice_${invoice.invoice_number}.pdf`, content: pdfBuffer }],
     });
 
-    console.log(`[Email] Sent invoice ${invoice.invoice_number} to: ${emailedTo} with ${podAttachments.length} POD(s)`);
+    console.log(`[Email] Sent invoice ${invoice.invoice_number} to: ${emailedTo} with ${podImageBuffers.length} POD(s)`);
 
     res.json({
       success: true,
-      message: `Invoice ${invoice.invoice_number} sent successfully to ${customerEmail}`,
+      message: `Invoice ${invoice.invoice_number} sent to ${customerEmail}`,
       emailed_to: emailedTo,
-      load_id: load_id,
+      load_id,
       invoice_number: invoice.invoice_number,
-      pod_count: podAttachments.length,
+      pod_count: podImageBuffers.length,
     });
 
   } catch (error) {
