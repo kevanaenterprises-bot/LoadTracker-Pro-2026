@@ -406,26 +406,20 @@ app.post('/api/send-invoice-email', async (req, res) => {
     const DRIVER_SUPABASE_ANON = process.env.DRIVER_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFla2V2eXFod3hxeXlwbWhqb2JkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMTUwNDEsImV4cCI6MjA4NjU5MTA0MX0.YXbIJG5F1nSB9obbuLkhINPcPyznCc4VpZhWuP70_BE';
     const driverHeaders = { 'apikey': DRIVER_SUPABASE_ANON, 'Authorization': `Bearer ${DRIVER_SUPABASE_ANON}` };
 
-    // Get load + customer from driver Supabase
-    const loadRes = await fetch(
-      `${DRIVER_SUPABASE_URL_BASE}/rest/v1/loads?id=eq.${load_id}&select=id,load_number,customer_id&limit=1`,
-      { headers: driverHeaders }
+    // Get load + customer from Railway PostgreSQL (source of truth)
+    const loadDbRes = await pool.query(
+      `SELECT l.id, l.load_number, l.customer_id, c.company_name, c.email
+       FROM loads l LEFT JOIN customers c ON c.id = l.customer_id
+       WHERE l.id = $1 LIMIT 1`,
+      [load_id]
     );
-    const loadRows = loadRes.ok ? await loadRes.json() : [];
-    if (!loadRows.length) {
+    if (!loadDbRes.rows.length) {
       return res.status(404).json({ error: 'Load not found' });
     }
-    const loadRow = loadRows[0];
+    const loadRow = loadDbRes.rows[0];
+    const customer = { company_name: loadRow.company_name, email: loadRow.email };
 
-    // Get customer email
-    const custRes = await fetch(
-      `${DRIVER_SUPABASE_URL_BASE}/rest/v1/customers?id=eq.${loadRow.customer_id}&select=company_name,email&limit=1`,
-      { headers: driverHeaders }
-    );
-    const custRows = custRes.ok ? await custRes.json() : [];
-    const customer = custRows[0] || {};
-
-    // Get invoice
+    // Get invoice from driver Supabase (created by driver app)
     const invRes = await fetch(
       `${DRIVER_SUPABASE_URL_BASE}/rest/v1/invoices?load_id=eq.${load_id}&select=invoice_number,amount&order=created_at.desc&limit=1`,
       { headers: driverHeaders }
