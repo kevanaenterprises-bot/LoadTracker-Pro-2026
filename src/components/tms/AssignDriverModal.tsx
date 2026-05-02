@@ -189,14 +189,15 @@ const AssignDriverModal: React.FC<AssignDriverModalProps> = ({ isOpen, load, onC
 
       // Mirror load to driver Supabase so Expo app can find it
       try {
-        // Look up driver in driver Supabase by phone to get the correct ID
+        // Look up driver in driver Supabase by phone — try most specific formats first
         const phone = selectedDriver.phone?.replace(/\D/g, '');
-        const { data: driverRows } = await driverSupabase
+        const { data: allDriverRows } = await driverSupabase
           .from('drivers')
-          .select('id')
-          .or(`phone.eq.${phone},phone.eq.1${phone},phone.eq.+1${phone}`)
-          .limit(1);
-        const driverSupabaseId = driverRows?.[0]?.id ?? selectedDriver.id;
+          .select('id, phone')
+          .or(`phone.eq.${phone},phone.eq.1${phone},phone.eq.+1${phone}`);
+        // Prefer records with country code prefix (more specific match)
+        const preferred = allDriverRows?.find(d => d.phone === `1${phone}` || d.phone === `+1${phone}`);
+        const driverSupabaseId = preferred?.id ?? allDriverRows?.[0]?.id ?? selectedDriver.id;
 
         await driverSupabase.from('loads').upsert({
           id: load.id,
