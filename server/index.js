@@ -5,8 +5,10 @@ import rateLimit from 'express-rate-limit';
 import nodemailer from 'nodemailer';
 import crypto from 'crypto';
 import hereApi from './hereApi.js';
-import PDFDocument from 'pdfkit';
-import { PDFDocument as LibPDF, rgb } from 'pdf-lib';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const PDFDocument = require('pdfkit');
+import { PDFDocument as LibPDF } from 'pdf-lib';
 
 const { Pool } = pg;
 
